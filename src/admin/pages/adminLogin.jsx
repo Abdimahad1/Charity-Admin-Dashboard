@@ -49,10 +49,20 @@ const AdminLogin = () => {
     sessionStorage.clear();
 
     try {
-      const res = await axios.post(
-        `${import.meta.env.VITE_API_BASE_URL}/api/auth/admin-login`,
-        form
-      );
+      // First try local
+      let res;
+      try {
+        res = await axios.post(
+          `${import.meta.env.VITE_API_BASE_URL}/api/auth/admin-login`,
+          form
+        );
+      } catch (err) {
+        console.warn('Local API failed, retrying with deployed API...');
+        res = await axios.post(
+          'https://charity-backend-30xl.onrender.com/api/auth/admin-login',
+          form
+        );
+      }
 
       const userRole = res.data?.user?.role;
       if (userRole !== 'Admin') {
