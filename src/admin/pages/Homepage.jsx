@@ -22,12 +22,21 @@ const IconCalendar = () => (<svg viewBox="0 0 24 24"><path d="M7 2h2v3H7V2zm8 0h
 const IconTag = () => (<svg viewBox="0 0 24 24"><path d="M10 3H3v7l8 8 7-7-8-8zm-6 2h4v4H4V5z"/></svg>);
 const IconPin = () => (<svg viewBox="0 0 24 24"><path d="M12 2l4 6h-3v5l2 3H9l2-3V8H8l4-6z"/></svg>);
 
-/* ---------- API instance ---------- */
-const API = axios.create({
-  baseURL: (import.meta.env.VITE_API_URL || "").replace(/\/$/, ""),
-});
+/* ---------- API instance (auto local vs deployed) ---------- */
+const LOCAL_BASE =
+  (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api").replace(/\/$/, "");
+const DEPLOY_BASE =
+  (import.meta.env.VITE_API_DEPLOY_URL || "https://charity-backend-30xl.onrender.com/api").replace(/\/$/, "");
+
+// If the app runs on localhost, use local API; otherwise use deployed API.
+const isLocalHost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+const BASE = isLocalHost ? LOCAL_BASE : DEPLOY_BASE;
+
+const API = axios.create({ baseURL: BASE });
+
+// attach token from sessionStorage (matches your AdminLogin)
 API.interceptors.request.use((cfg) => {
-  const t = localStorage.getItem("token");
+  const t = sessionStorage.getItem("token");
   if (t) cfg.headers.Authorization = `Bearer ${t}`;
   return cfg;
 });
