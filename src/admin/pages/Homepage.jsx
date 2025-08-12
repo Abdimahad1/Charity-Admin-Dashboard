@@ -154,7 +154,7 @@ export default function Homepage() {
       setSaving(true);
       const fd = new FormData();
       fd.append("file", form.file);
-      const up = await API.post("/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      const up = await API.post("/upload/image", fd, { headers: { "Content-Type": "multipart/form-data" } });
       const url = up.data?.url;
 
       const payload = {
