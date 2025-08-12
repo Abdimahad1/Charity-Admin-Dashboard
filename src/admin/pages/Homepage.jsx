@@ -154,7 +154,7 @@ export default function Homepage() {
       setSaving(true);
       const fd = new FormData();
       fd.append("file", form.file);
-      const up = await API.post("/upload/image", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      const up = await API.post("/upload/image", fd); // Updated line: let Axios set headers
       const url = up.data?.url;
 
       const payload = {
@@ -190,7 +190,7 @@ export default function Homepage() {
       if (form.file) {
         const fd = new FormData();
         fd.append("file", form.file);
-        const up = await API.post("/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
+        const up = await API.post("/upload/image", fd); // Updated line
         newSrc = up.data?.url;
       }
 
@@ -369,7 +369,7 @@ export default function Homepage() {
       // upload
       const fd = new FormData();
       fd.append("file", evForm.file);
-      const up = await API.post("/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      const up = await API.post("/upload/image", fd); // Updated line
       const url = up.data?.url;
 
       const payload = {
@@ -402,7 +402,7 @@ export default function Homepage() {
       if (evForm.file) {
         const fd = new FormData();
         fd.append("file", evForm.file);
-        const up = await API.post("/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
+        const up = await API.post("/upload/image", fd); // Updated line
         newCover = up.data?.url;
       }
       const payload = {
