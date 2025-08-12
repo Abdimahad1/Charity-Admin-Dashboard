@@ -174,3 +174,69 @@
 .pv-actions { display:flex; gap:.6rem; margin-top:.8rem; }
 .pv-btn { border:0; border-radius:999px; padding:.55rem 1.1rem; font-weight:800; cursor:pointer; background:#eef3ff; color:#203a8f; box-shadow: 0 10px 20px rgba(32,58,143,.12); }
 .pv-btn.primary { background: var(--a-brand); color:#fff; box-shadow: 0 12px 26px rgba(15,108,255,.25); }
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+  /* Stack header actions */
+  .char-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.6rem;
+  }
+
+  .char-actions .search {
+    width: 100%;
+  }
+
+  .char-actions .search input {
+    width: 100%;
+  }
+
+  .char-actions select,
+  .char-actions .btn {
+    width: 100%;
+  }
+
+  /* Make table scrollable */
+  .table-wrap {
+    overflow-x: auto;
+  }
+
+  /* Reduce cell padding on mobile */
+  .tbl.compact tbody td,
+  .tbl thead th {
+    padding: 0.45rem;
+  }
+
+  /* Stack row actions */
+  .row-actions {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  /* Modal adjustments for small screens */
+  .modal-content {
+    width: 95%;
+    height: auto;
+    max-height: 90%;
+    overflow-y: auto;
+    border-radius: 10px;
+    padding: 0.8rem;
+  }
+}
+
+/* Very small devices */
+@media (max-width: 480px) {
+  .char-head h2 {
+    font-size: 1rem;
+  }
+
+  .btn {
+    font-size: 0.9rem;
+    padding: 0.4rem 0.6rem;
+  }
+
+  .grid-3 {
+    grid-template-columns: 1fr !important;
+  }
+}

@@ -15,26 +15,37 @@ body { padding-top: 0 !important; box-sizing: border-box; }
 .admin-shell{
   display:grid;
   grid-template-columns: var(--a-sidebar-w) minmax(0,1fr);
-  column-gap: 16px;              /* <-- gutter between sidebar & content */
+  column-gap: 16px;
   min-height:100vh;
   background:linear-gradient(180deg,#0b1220,#0a1020);
+  overflow-x:hidden; /* prevent off-canvas scroll */
 }
 @supports(height:100dvh){ .admin-shell{min-height:100dvh;} }
 
-/* Sidebar */
+/* =============== SIDEBAR (DESKTOP DEFAULT) =============== */
 .admin-sidebar{
   position:sticky; top:0;
   height:100vh; overflow-y:auto;
   background:linear-gradient(180deg,#0f1629 0%,#0b1220 100%);
   border-right:1px solid rgba(255,255,255,.06);
   padding:.85rem .75rem 1rem;
+  transition:transform .3s ease;
+  z-index:1200; /* above overlay */
 }
 .admin-sidebar::-webkit-scrollbar{width:10px;}
 .admin-sidebar::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:12px;}
 .admin-sidebar::-webkit-scrollbar-track{background:transparent;}
 
-.admin-brand{display:flex;align-items:center;gap:.6rem;color:var(--a-text);font-weight:800;letter-spacing:.01em;padding:.4rem .55rem;margin-bottom:.4rem;}
-.admin-brand .dot{width:10px;height:10px;border-radius:999px;background:var(--a-accent);box-shadow:0 0 0 3px rgba(255,215,0,.15);}
+.admin-brand{
+  display:flex;align-items:center;gap:.6rem;
+  color:var(--a-text);font-weight:800;letter-spacing:.01em;
+  padding:.4rem .55rem;margin-bottom:.4rem;
+}
+.admin-brand .dot{
+  width:10px;height:10px;border-radius:999px;
+  background:var(--a-accent);
+  box-shadow:0 0 0 3px rgba(255,215,0,.15);
+}
 
 /* =============== NAV =============== */
 .a-nav{display:grid;gap:.2rem;}
@@ -48,7 +59,6 @@ body { padding-top: 0 !important; box-sizing: border-box; }
   transition:transform .12s ease, background .12s ease, color .12s ease, box-shadow .12s ease;
   outline:none;
 }
-/* left rail */
 .a-link::before{
   content:""; position:absolute; left:6px; top:8px; bottom:8px; width:3px; border-radius:3px;
   background:transparent; transform:scaleY(.5); opacity:0;
@@ -70,7 +80,12 @@ body { padding-top: 0 !important; box-sizing: border-box; }
 }
 
 /* Icons */
-.i{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:rgba(15,108,255,.15);color:var(--a-brand);box-shadow:inset 0 1px 0 rgba(255,255,255,.05);transition:transform .12s ease, background .12s ease, color .12s ease, box-shadow .12s ease;}
+.i{
+  width:32px;height:32px;border-radius:10px;display:grid;place-items:center;
+  background:rgba(15,108,255,.15);color:var(--a-brand);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.05);
+  transition:transform .12s ease, background .12s ease, color .12s ease, box-shadow .12s ease;
+}
 .i svg{width:18px;height:18px;fill:currentColor;}
 .a-link:hover .i{background:rgba(255,215,0,.18);color:var(--a-accent);transform:scale(1.05);}
 .a-link.active .i,
@@ -86,14 +101,14 @@ body { padding-top: 0 !important; box-sizing: border-box; }
 
 .admin-topbar{
   display:flex; align-items:center; justify-content:space-between;
-  padding:.9rem 1.25rem;                 /* a bit more room at the top bar */
+  padding:.9rem 1.25rem;
   border-bottom:1px solid rgba(255,255,255,.06);
 }
 .admin-page-title{margin:0;font-size:1.05rem;color:#eaf0ff;}
 
 .admin-content{
   flex:1;
-  padding: 1rem;                         /* <-- space inside main content */
+  padding: 1rem;
   overflow:auto;
 }
 
@@ -106,51 +121,82 @@ body { padding-top: 0 !important; box-sizing: border-box; }
   box-shadow:0 10px 30px rgba(0,0,0,.15);
 }
 
-/* =============== RESPONSIVE =============== */
+/* =============== MOBILE (<=980px): Drawer + Overlay =============== */
 @media (max-width:980px){
-  .admin-shell{grid-template-columns:64px minmax(0,1fr); column-gap: 12px;}
-  .admin-sidebar{padding:.6rem .4rem;}
-  .a-link{grid-template-columns:34px; justify-items:center;}
-  .a-link span{display:none;}
-  .a-section{display:none;}
-  .admin-page-title{font-size:1rem;}
+  .admin-shell{ grid-template-columns: 1fr; }
+
+  /* drawer is hidden by default */
+  .admin-sidebar{
+    display:none !important;
+  }
+  /* drawer when open */
+  .admin-sidebar.open{
+    display:block !important;
+    position:fixed; top:0; left:0;
+    width:280px; height:100vh;
+    background:linear-gradient(180deg,#0f1629 0%,#0b1220 100%);
+    box-shadow:4px 0 15px rgba(0,0,0,.3);
+    transform:translateX(0);
+    z-index:1200;
+  }
+
+  /* floating button */
+  .mobile-menu-button{
+    position:fixed; top:1rem; left:1rem;
+    background:rgba(255,255,255,.95);
+    border:none; border-radius:50%;
+    width:44px; height:44px;
+    display:flex; align-items:center; justify-content:center;
+    z-index:1300; cursor:pointer;
+    box-shadow:0 2px 10px rgba(0,0,0,.2);
+    transition:transform .2s ease, background .2s ease;
+  }
+  .mobile-menu-button:hover{ background:#fff; transform:scale(1.05); }
+  .mobile-menu-button svg{ width:24px; height:24px; fill:#0b1220; }
+
+  /* close icon area in drawer */
+  .mobile-sidebar-header{ display:flex; justify-content:flex-end; padding:1rem; }
+  .close-sidebar-button{ background:none; border:none; color:var(--a-text); cursor:pointer; padding:.5rem; }
+
+  /* overlay under drawer, over page */
+  .sidebar-overlay{
+    position:fixed; inset:0;
+    background:rgba(0,0,0,.35);
+    z-index:1100;
+    backdrop-filter:none; /* add blur(2px) if you like */
+  }
+
+  /* tablet-compact rules don't apply here; labels stay visible in drawer */
 }
 
-/* Motion-safe */
-@media (prefers-reduced-motion:reduce){ *{transition:none!important; animation:none!important;} }
+/* =============== TABLET (769px–980px): Compact Icon Rail =============== */
+@media (min-width:769px) and (max-width:980px){
+  .admin-shell{ grid-template-columns:64px minmax(0,1fr); column-gap:12px; }
+  .admin-sidebar{ position:sticky; transform:none; width:auto; padding:.6rem .4rem; display:block !important; }
+  .a-link{ grid-template-columns:34px; justify-items:center; }
+  .a-link span{ display:none; }
+  .a-section{ display:none; }
+  .mobile-menu-button{ display:none; }
+}
 
+/* =============== MOTION-SAFE =============== */
+@media (prefers-reduced-motion:reduce){
+  *{transition:none!important; animation:none!important;}
+}
 
-/* Logout button styles */
+/* =============== LOGOUT BUTTON =============== */
 .a-nav .logout-btn {
-  width: 100%;
-  text-align: left;
-  background: none;
-  border: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-  padding: 0.75rem 1rem;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  border-radius: 0.375rem;
-  transition: background-color 0.2s ease;
+  width:100%; text-align:left;
+  background:none; border:none; color:inherit; font:inherit;
+  cursor:pointer; padding:0.75rem 1rem;
+  display:flex; align-items:center; gap:0.75rem;
+  border-radius:0.375rem;
+  transition:background-color 0.2s ease;
 }
+.a-nav .logout-btn:hover { background-color:rgba(255,255,255,0.1); }
+.a-nav .logout-btn .i svg { width:1.25rem; height:1.25rem; fill:currentColor; }
 
-.a-nav .logout-btn:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-}
-
-.a-nav .logout-btn .i svg {
-  width: 1.25rem;
-  height: 1.25rem;
-  fill: currentColor;
-}
-
-/* Logout button: force white text (and icon) */
 .a-link.logout-btn,
 .a-link.logout-btn:hover,
-.a-link.logout-btn:focus {
-  color: #fff;
-}
-.a-link.logout-btn svg { fill: currentColor; }
+.a-link.logout-btn:focus { color:#fff; }
+.a-link.logout-btn svg { fill:currentColor; }
