@@ -1,7 +1,7 @@
 // src/admin/pages/Dashboard.jsx
 import React from "react";
 import { Link } from "react-router-dom";
-import "../../styles/Dashboard.css"; // <-- import the dashboard styles
+import "../../styles/dashboard.css"; // <-- import the dashboard styles
 
 /* ---- Inline Icons ---- */
 const I = ({ children }) => <span className="dash-i">{children}</span>;
