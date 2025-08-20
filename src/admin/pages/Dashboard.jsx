@@ -1,13 +1,43 @@
 // src/admin/pages/Dashboard.jsx
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import "../../styles/dashboard.css"; // <-- import the dashboard styles
+import axios from "axios";
+import "../../styles/dashboard.css";
+
+/* ---------- API instance (auto local vs deployed) ---------- */
+const LOCAL_BASE =
+  (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api").replace(/\/$/, "");
+const DEPLOY_BASE =
+  (import.meta.env.VITE_API_DEPLOY_URL || "https://charity-backend-30xl.onrender.com/api").replace(/\/$/, "");
+
+const isLocalHost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+const BASE = isLocalHost ? LOCAL_BASE : DEPLOY_BASE;
+
+const API = axios.create({ baseURL: BASE });
+
+API.interceptors.request.use((cfg) => {
+  const t = sessionStorage.getItem("token");
+  if (t) cfg.headers.Authorization = `Bearer ${t}`;
+  return cfg;
+});
+
+/* ---- Helper function to normalize API responses ---- */
+const normalizeMany = (data) => {
+  const arr = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
+  return arr.map(item => ({ id: item.id || item._id, ...item }));
+};
 
 /* ---- Inline Icons ---- */
 const I = ({ children }) => <span className="dash-i">{children}</span>;
 
 const IconMoney = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v12H3zM6 9h12M6 15h12M9 12h2"/></svg>
+);
+const IconChart = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16v2H4zM6 10h3v7H6zM11 5h3v12h-3zM16 12h3v5h-3z"/></svg>
+);
+const IconUsers = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11a4 4 0 110-8 4 4 0 010 8zm10-1a3 3 0 110-6 3 3 0 010 6zM2 20v-1c0-3 4-5 8-5s8 2 8 5v1H2zm13 0v-1c0-1 .5-2 1.4-2.6.9-.6 2.2-.9 3.6-.9 2.3 0 5 1.1 5 3.5V20h-10z"/></svg>
 );
 const IconTarget = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 109 9h-2a7 7 0 11-7-7V3zM12 8v4l3 2"/></svg>
@@ -36,42 +66,142 @@ const IconAdd = () => (
 const IconReport = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h9l5 5v15H6zM14 2v6h6"/></svg>
 );
+const IconLoader = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true" className="spin">
+    <path d="M12 2a10 10 0 1010 10A10 10 0 0012 2zm0 18a8 8 0 118-8 8 8 0 01-8 8z" opacity="0.4"/>
+    <path d="M12 2a10 10 0 0110 10h-2a8 8 0 00-8-8z"/>
+  </svg>
+);
 
-/* ---- Mock data ---- */
-const kpis = {
-  todayDonations: 1260.5,
-  mtdDonations: 23450,
-  mtdTarget: 40000,
-  activeCollections: 7,
-  totalCollections: 12,
-  pendingApprovals: 4
+const currency = (n, c = "USD") => {
+  try { 
+    return new Intl.NumberFormat(undefined, { 
+      style: "currency", 
+      currency: c, 
+      minimumFractionDigits: 0 
+    }).format(n); 
+  } catch { 
+    return `${n} ${c}`; 
+  }
 };
 
-const activity = [
-  { id: 1, name: "Amina N.", action: "approved a new charity", at: "2m ago" },
-  { id: 2, name: "System", action: "received donation £250 to ‘Clean Water’", at: "15m ago" },
-  { id: 3, name: "Yusuf K.", action: "uploaded 3 media files", at: "22m ago" },
-  { id: 4, name: "Admin", action: "updated homepage hero images", at: "1h ago" },
-];
-
-const topPosts = [
-  { id: 1, title: "Back-to-School Kits", perf: 92, donations: 8450 },
-  { id: 2, title: "Maternal Health Camp", perf: 87, donations: 6120 },
-  { id: 3, title: "Village Well Build", perf: 81, donations: 9700 },
-];
-
-const recentVolunteers = [
-  { id: 1, name: "Hodan Ali", role: "Field Support" },
-  { id: 2, name: "Ibrahim Noor", role: "Logistics" },
-  { id: 3, name: "Leila Ahmed", role: "Clinic Assistant" },
-  { id: 4, name: "Omar Faruk", role: "Fundraising" },
-];
-
-const currency = (n) =>
-  new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 }).format(n);
-
 export default function Dashboard() {
-  const mtdPct = Math.min(100, Math.round((kpis.mtdDonations / kpis.mtdTarget) * 100));
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [payments, setPayments] = useState({
+    items: [],
+    total: 0,
+    totalPages: 0,
+    page: 1,
+    limit: 50
+  });
+  const [charities, setCharities] = useState([]);
+  const [volunteers, setVolunteers] = useState([]);
+
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        // Fetch all data in parallel
+        const [paymentsResponse, charitiesResponse, volunteersResponse] = await Promise.all([
+          API.get('/payments/admin', { params: { limit: 50 } }),
+          API.get('/charities/admin/list'),
+          API.get('/volunteers')
+        ]);
+        
+        setPayments(paymentsResponse.data);
+        
+        // Use normalizeMany to handle different response formats
+        const charitiesArray = normalizeMany(charitiesResponse.data);
+        setCharities(charitiesArray);
+        
+        setVolunteers(volunteersResponse.data);
+      } catch (err) {
+        console.error('Failed to fetch dashboard data:', err);
+        setError('Failed to load dashboard data. Please try again later.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, []);
+
+  // Calculate KPIs from payments data
+  const now = new Date();
+  const isSameDay = (a, b) => a.getFullYear() === b.getFullYear() && 
+                            a.getMonth() === b.getMonth() && 
+                            a.getDate() === b.getDate();
+  const isSameMonth = (a, b) => a.getFullYear() === b.getFullYear() && 
+                              a.getMonth() === b.getMonth();
+
+  // Safely calculate KPIs
+  const todaysTotal = (payments.items || [])
+    .filter(p => p.createdAt && isSameDay(new Date(p.createdAt), now) && p.status === "success")
+    .reduce((s, p) => s + (p.amount || 0), 0);
+
+  const mtdTotal = (payments.items || [])
+    .filter(p => p.createdAt && isSameMonth(new Date(p.createdAt), now) && p.status === "success")
+    .reduce((s, p) => s + (p.amount || 0), 0);
+
+  const count = (payments.items || []).length;
+  const successRate = (() => {
+    const ok = (payments.items || []).filter(p => p.status === "success").length || 0;
+    return count ? Math.round((ok / count) * 100) : 0;
+  })();
+
+  // Calculate yesterday's total for comparison
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayTotal = (payments.items || [])
+    .filter(p => p.createdAt && isSameDay(new Date(p.createdAt), yesterday) && p.status === "success")
+    .reduce((s, p) => s + (p.amount || 0), 0);
+
+  const donationGrowth = yesterdayTotal > 0 
+    ? Math.round(((todaysTotal - yesterdayTotal) / yesterdayTotal) * 100)
+    : todaysTotal > 0 ? 100 : 0;
+
+  // MTD Target (you might want to fetch this from your API)
+  const mtdTarget = 100000; // Example target
+  const mtdPct = mtdTarget > 0 
+    ? Math.min(100, Math.round((mtdTotal / mtdTarget) * 100))
+    : 0;
+
+  if (loading) {
+    return (
+      <div className="dash">
+        <div className="dash-head">
+          <h2 className="dash-title">
+            <I><IconSpark /></I>
+            Admin Dashboard
+          </h2>
+        </div>
+        <div className="loading-state">
+          <I><IconLoader /></I>
+          <p>Loading dashboard data...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="dash">
+        <div className="dash-head">
+          <h2 className="dash-title">
+            <I><IconSpark /></I>
+            Admin Dashboard
+          </h2>
+        </div>
+        <div className="error-state">
+          <p>{error}</p>
+          <button onClick={() => window.location.reload()}>Retry</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="dash">
@@ -83,43 +213,46 @@ export default function Dashboard() {
         <p className="dash-sub">Quick pulse of the organisation.</p>
       </div>
 
+      {/* Donation KPIs - Replaced with cards from Donations page */}
       <section className="dash-kpis">
         <article className="kpi-card pop-in">
           <I><IconMoney /></I>
           <div className="kpi-meta">
-            <div className="kpi-label">Today’s Donations</div>
-            <div className="kpi-value">{currency(kpis.todayDonations)}</div>
-            <div className="kpi-note up">+12% vs yesterday</div>
+            <div className="kpi-label">Today's Payments</div>
+            <div className="kpi-value">{currency(todaysTotal, "USD")}</div>
+            <div className={`kpi-note ${donationGrowth >= 0 ? 'up' : 'down'}`}>
+              {donationGrowth >= 0 ? '+' : ''}{donationGrowth}% vs yesterday
+            </div>
           </div>
         </article>
 
         <article className="kpi-card pop-in delay-1">
-          <I><IconTarget /></I>
+          <I><IconChart /></I>
           <div className="kpi-meta">
-            <div className="kpi-label">MTD Donations</div>
-            <div className="kpi-value">{currency(kpis.mtdDonations)}</div>
+            <div className="kpi-label">MTD Total</div>
+            <div className="kpi-value">{currency(mtdTotal, "USD")}</div>
             <div className="kpi-progress">
               <div className="bar"><span style={{ width: `${mtdPct}%` }} /></div>
-              <span className="kpi-note">{mtdPct}% of {currency(kpis.mtdTarget)}</span>
+              <span className="kpi-note">{mtdPct}% of {currency(mtdTarget, "USD")}</span>
             </div>
           </div>
         </article>
 
         <article className="kpi-card pop-in delay-2">
-          <I><IconCampaign /></I>
+          <I><IconUsers /></I>
           <div className="kpi-meta">
-            <div className="kpi-label">Active Collections</div>
-            <div className="kpi-value">{kpis.activeCollections}/{kpis.totalCollections}</div>
-            <div className="kpi-note">Running campaigns</div>
+            <div className="kpi-label">Records</div>
+            <div className="kpi-value">{count}</div>
+            <div className="kpi-note">Total transactions</div>
           </div>
         </article>
 
         <article className="kpi-card pop-in delay-3 bounce">
-          <I><IconPending /></I>
+          <I><IconChart /></I>
           <div className="kpi-meta">
-            <div className="kpi-label">Pending Approvals</div>
-            <div className="kpi-value">{kpis.pendingApprovals}</div>
-            <div className="kpi-note warn">Requires review</div>
+            <div className="kpi-label">Success Rate</div>
+            <div className="kpi-value">{successRate}%</div>
+            <div className="kpi-note">Successful transactions</div>
           </div>
         </article>
       </section>
@@ -128,41 +261,28 @@ export default function Dashboard() {
         <div className="dash-left">
           <div className="dash-card">
             <div className="card-head">
-              <h3>Activity Feed</h3>
-              <span className="hint">Latest admin actions & submissions</span>
-            </div>
-            <ul className="activity">
-              {activity.map(a => (
-                <li key={a.id} className="activity-item">
-                  <div className="avatar" aria-hidden="true">{a.name.charAt(0)}</div>
-                  <div className="act-text">
-                    <strong>{a.name}</strong> {a.action}
-                    <span className="time"> · {a.at}</span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div className="dash-card">
-            <div className="card-head">
               <h3>Top-Performing Charity Posts</h3>
               <span className="hint">Based on engagement & donations</span>
             </div>
             <div className="top-posts">
-              {topPosts.map(p => (
-                <div key={p.id} className="post">
+              {charities.slice(0, 3).map(p => (
+                <div key={p.id || p._id} className="post">
                   <div className="post-icon"><IconHeart /></div>
                   <div className="post-info">
-                    <div className="post-title">{p.title}</div>
+                    <div className="post-title">{p.title || p.name}</div>
                     <div className="post-meta">
-                      <span className="badge">Performance {p.perf}%</span>
-                      <span className="badge ghost">{currency(p.donations)}</span>
+                      <span className="badge">Performance {p.performance || p.engagement || 0}%</span>
+                      <span className="badge ghost">{currency(p.donations || p.totalDonations || 0, "USD")}</span>
                     </div>
-                    <div className="mini-bar"><span style={{ width: `${p.perf}%` }} /></div>
+                    <div className="mini-bar"><span style={{ width: `${p.performance || p.engagement || 0}%` }} /></div>
                   </div>
                 </div>
               ))}
+              {charities.length === 0 && (
+                <div className="empty-state">
+                  <p>No charity data available</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -174,15 +294,20 @@ export default function Dashboard() {
               <span className="hint">New registrations</span>
             </div>
             <ul className="vols">
-              {recentVolunteers.map(v => (
-                <li key={v.id} className="vol">
+              {volunteers.slice(0, 4).map(v => (
+                <li key={v.id || v._id} className="vol">
                   <I><IconUser /></I>
                   <div className="vol-meta">
-                    <div className="vol-name">{v.name}</div>
-                    <div className="vol-role">{v.role}</div>
+                    <div className="vol-name">{v.fullName || "Anonymous Volunteer"}</div>
+                    <div className="vol-role">{v.role || 'Volunteer'}</div>
                   </div>
                 </li>
               ))}
+              {volunteers.length === 0 && (
+                <li className="empty-state">
+                  <p>No volunteer data available</p>
+                </li>
+              )}
             </ul>
           </div>
 
@@ -192,7 +317,7 @@ export default function Dashboard() {
               <span className="hint">Do things quickly</span>
             </div>
             <div className="shortcuts">
-              <Link to="/admin/charities/new" className="shortcut lift">
+              <Link to="/admin/charities" className="shortcut lift">
                 <I><IconAdd /></I>
                 <div>
                   <strong>Create Charity</strong>
@@ -200,7 +325,7 @@ export default function Dashboard() {
                 </div>
               </Link>
 
-              <Link to="/admin/media" className="shortcut lift">
+              <Link to="/admin/homepage" className="shortcut lift">
                 <I><IconUpload /></I>
                 <div>
                   <strong>Upload Media</strong>

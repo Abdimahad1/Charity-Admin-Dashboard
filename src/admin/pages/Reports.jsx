@@ -1,6 +1,27 @@
 // src/admin/pages/Reports.jsx
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import "../../styles/Reports.css";
+import axios from "axios";
+
+/* ---------- API Configuration ---------- */
+const LOCAL_BASE =
+  (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api").replace(/\/$/, "");
+const DEPLOY_BASE =
+  (import.meta.env.VITE_API_DEPLOY_URL || "https://charity-backend-30xl.onrender.com/api").replace(/\/$/, "");
+
+// If the app runs on localhost, use local API; otherwise use deployed API.
+const isLocalHost = ["localhost", "127.0.0.1", ""].includes(window.location.hostname);
+const BASE = isLocalHost ? LOCAL_BASE : DEPLOY_BASE;
+
+// Create axios instance with base URL
+const API = axios.create({ baseURL: BASE });
+
+// Attach token from sessionStorage
+API.interceptors.request.use((cfg) => {
+  const t = sessionStorage.getItem("token") || localStorage.getItem('token');
+  if (t) cfg.headers.Authorization = `Bearer ${t}`;
+  return cfg;
+});
 
 /* ===== Inline icons (large & simple) ===== */
 const I = ({ children }) => <span className="rpt-icon">{children}</span>;
@@ -29,36 +50,11 @@ const IconDownload = () => (
 const IconEye = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5c5.5 0 9.9 3.6 11 7-1.1 3.4-5.5 7-11 7S2.1 15.4 1 12c1.1-3.4 5.5-7 11-7zm0 3a4 4 0 104 4 4 4 0 00-4-4z"/></svg>
 );
-
-/* ===== Sample datasets (replace with API data) ===== */
-const sampleDonations = [
-  { date: "2025-08-10", donor: "Ayaan Ali", method: "EVC", currency: "USD", amount: 50, project: "Clean Water" },
-  { date: "2025-08-10", donor: "Mohamed Noor", method: "E-Dahab", currency: "USD", amount: 25, project: "School Kits" },
-  { date: "2025-08-09", donor: "Anonymous", method: "EVC", currency: "USD", amount: 100, project: "Mobile Clinic" },
-  { date: "2025-08-08", donor: "Ifrah Ahmed", method: "EVC", currency: "USD", amount: 15, project: "Food Relief" },
-  { date: "2025-08-08", donor: "Yahye Farah", method: "EVC", currency: "USD", amount: 75, project: "Women Grants" },
-];
-
-const sampleVolunteers = [
-  { date: "2025-08-09", name: "Hodan Isse", email: "hodan@example.com", phone: "61xxxxxxx", city: "Mogadishu", status: "Approved" },
-  { date: "2025-08-08", name: "Sagal Hassan", email: "sagal@example.com", phone: "65xxxxxxx", city: "Hargeisa", status: "Pending" },
-  { date: "2025-08-07", name: "Bile Ali",   email: "bile@example.com",  phone: "66xxxxxxx", city: "Garowe",    status: "Approved" },
-];
-
-const sampleCharities = [
-  { date: "2025-08-07", title: "Village Borehole", status: "Published", category: "Water", country: "Somalia" },
-  { date: "2025-08-04", title: "Back-to-School Kits", status: "Draft", category: "Education", country: "Somalia" },
-];
-
-const sampleCollections = [
-  { date: "2025-08-05", name: "Ramadan Drive", status: "Open", goalUSD: 10000, raisedUSD: 7200 },
-  { date: "2025-07-10", name: "Health Week", status: "Closed", goalUSD: 5000, raisedUSD: 5200 },
-];
-
-const sampleFinance = [
-  { month: "2025-07", donationsUSD: 15480, refundsUSD: 120, netUSD: 15360 },
-  { month: "2025-08", donationsUSD: 8900, refundsUSD: 0, netUSD: 8900 },
-];
+const IconLoading = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true" className="spinner">
+    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" strokeDasharray="15.7 15.7" />
+  </svg>
+);
 
 /* ===== Report catalog ===== */
 const REPORTS = [
@@ -73,46 +69,114 @@ const REPORTS = [
 const formatMoney = (n, c = "USD") =>
   new Intl.NumberFormat(undefined, { style: "currency", currency: c, maximumFractionDigits: 0 }).format(n);
 
+const formatDate = (dateString) => {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  return date.toLocaleDateString();
+};
+
 /* Build preview (columns + rows) by report type */
-function buildPreview(type) {
+function buildPreview(type, data) {
   switch (type) {
     case "donations":
       return {
         title: "Donations Report",
-        subtitle: "Latest donations (sample data)",
-        headers: ["Date", "Donor", "Method", "Currency", "Amount", "Project"],
-        rows: sampleDonations.map(d => [d.date, d.donor, d.method, d.currency, formatMoney(d.amount, d.currency), d.project]),
+        subtitle: `Donations from ${formatDate(data.periodStart)} to ${formatDate(data.periodEnd)}`,
+        headers: ["Date", "Donor", "Method", "Currency", "Amount", "Phone"],
+        rows: (data.donations || []).map(d => [ // Added fallback for undefined
+          formatDate(d.createdAt),
+          d.name || "Anonymous",
+          d.method,
+          d.currency,
+          formatMoney(d.amount, d.currency),
+          d.phone || "N/A"
+        ]),
+        summary: {
+          total: formatMoney(data.summary.totalAmount || 0),
+          count: data.summary.count || 0,
+          average: formatMoney(data.summary.avgAmount || 0)
+        }
       };
     case "volunteers":
       return {
         title: "Volunteers Report",
-        subtitle: "Recent volunteers & status",
-        headers: ["Date", "Name", "Email", "Phone", "City", "Status"],
-        rows: sampleVolunteers.map(v => [v.date, v.name, v.email, v.phone, v.city, v.status]),
+        subtitle: `Volunteers from ${formatDate(data.periodStart)} to ${formatDate(data.periodEnd)}`,
+        headers: ["Date", "Name", "Email", "Phone", "City", "Status", "Role"],
+        rows: (data.volunteers || []).map(v => [ // Added fallback for undefined
+          formatDate(v.createdAt),
+          v.fullName,
+          v.email,
+          v.phone,
+          v.city,
+          v.status,
+          v.role
+        ]),
+        summary: {
+          count: data.summary.count || 0
+        }
       };
     case "charities":
       return {
         title: "Charities Report",
-        subtitle: "Projects & publication state",
-        headers: ["Date", "Title", "Status", "Category", "Country"],
-        rows: sampleCharities.map(c => [c.date, c.title, c.status, c.category, c.country]),
+        subtitle: "All charity projects",
+        headers: ["Title", "Category", "Location", "Goal", "Raised", "Status", "Created"],
+        rows: (data.charities || []).map(c => [ // Added fallback for undefined
+          c.title,
+          c.category,
+          c.location,
+          formatMoney(c.goal),
+          formatMoney(c.raised),
+          c.status,
+          formatDate(c.createdAt)
+        ]),
+        summary: {
+          count: data.summary.count || 0,
+          totalGoal: formatMoney(data.summary.totalGoal || 0),
+          totalRaised: formatMoney(data.summary.totalRaised || 0)
+        }
       };
     case "collections":
       return {
         title: "Collections Report",
-        subtitle: "Open/closed collections and progress",
-        headers: ["Date", "Name", "Status", "Goal (USD)", "Raised (USD)"],
-        rows: sampleCollections.map(c => [c.date, c.name, c.status, formatMoney(c.goalUSD), formatMoney(c.raisedUSD)]),
+        subtitle: "Fundraising collections progress",
+        headers: ["Title", "Category", "Goal", "Raised", "Progress", "Status", "Created"],
+        rows: (data.collections || []).map(c => { // Added fallback for undefined
+          const progress = c.goal > 0 ? Math.round((c.raised / c.goal) * 100) : 0;
+          return [
+            c.title,
+            c.category,
+            formatMoney(c.goal),
+            formatMoney(c.raised),
+            `${progress}%`,
+            c.status,
+            formatDate(c.createdAt)
+          ];
+        }),
+        summary: {
+          count: data.summary.count || 0,
+          totalGoal: formatMoney(data.summary.totalGoal || 0),
+          totalRaised: formatMoney(data.summary.totalRaised || 0),
+          completion: data.summary.completionRate ? `${Math.round(data.summary.completionRate * 100)}%` : "0%"
+        }
       };
     case "finance":
       return {
         title: "Finance Summary",
-        subtitle: "Monthly totals (USD)",
-        headers: ["Month", "Donations", "Refunds", "Net"],
-        rows: sampleFinance.map(f => [f.month, formatMoney(f.donationsUSD), formatMoney(f.refundsUSD), formatMoney(f.netUSD)]),
+        subtitle: `Monthly financial overview from ${formatDate(data.periodStart)} to ${formatDate(data.periodEnd)}`,
+        headers: ["Month", "Donations", "Transactions"],
+        rows: (data.monthlyData || []).map(f => [ // Added fallback for undefined
+          f.month,
+          formatMoney(f.donationsUSD),
+          f.count
+        ]),
+        summary: {
+          total: formatMoney(data.summary.totalAmount || 0),
+          count: data.summary.count || 0,
+          average: formatMoney(data.summary.avgAmount || 0)
+        }
       };
     default:
-      return { title: "Report", subtitle: "", headers: [], rows: [] };
+      return { title: "Report", subtitle: "", headers: [], rows: [], summary: {} };
   }
 }
 
@@ -169,8 +233,146 @@ function printPreview(title, headers, rows) {
 }
 
 export default function Reports() {
-  const [active, setActive] = useState(null); // 'donations' | 'volunteers' | ...
-  const preview = useMemo(() => (active ? buildPreview(active) : null), [active]);
+  const [active, setActive] = useState(null);
+  const [reportData, setReportData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [period, setPeriod] = useState("month");
+  const [filters, setFilters] = useState({});
+
+  const preview = useMemo(() => {
+    if (!active || !reportData) return null;
+    return buildPreview(active, reportData);
+  }, [active, reportData]);
+
+  // Fetch report data when active report changes
+  useEffect(() => {
+    if (!active) return;
+    
+    const fetchReportData = async () => {
+      setLoading(true);
+      setError("");
+      try {
+        let response;
+        
+        switch (active) {
+          case "donations":
+            response = await API.get("/payments/admin", {
+              params: { status: "success", limit: 100, page: 1 }
+            });
+            setReportData({
+              donations: response.data.items || [],
+              summary: {
+                totalAmount: response.data.items?.reduce((sum, item) => sum + (item.amount || 0), 0) || 0,
+                count: response.data.items?.length || 0,
+                avgAmount: response.data.items?.length ? 
+                  response.data.items.reduce((sum, item) => sum + (item.amount || 0), 0) / response.data.items.length : 0
+              },
+              periodStart: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+              periodEnd: new Date().toISOString()
+            });
+            break;
+            
+          case "volunteers":
+            response = await API.get("/volunteers");
+            setReportData({
+              volunteers: response.data || [],
+              summary: { count: response.data?.length || 0 },
+              periodStart: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+              periodEnd: new Date().toISOString()
+            });
+            break;
+            
+          case "charities":
+            response = await API.get("/charities/admin/list", {
+              params: { status: "all", limit: 100, page: 1 }
+            });
+            setReportData({
+              charities: response.data.items || response.data || [],
+              summary: {
+                count: response.data.items?.length || response.data?.length || 0,
+                totalGoal: response.data.items?.reduce((sum, item) => sum + (item.goal || 0), 0) || 
+                          response.data?.reduce((sum, item) => sum + (item.goal || 0), 0) || 0,
+                totalRaised: response.data.items?.reduce((sum, item) => sum + (item.raised || 0), 0) || 
+                            response.data?.reduce((sum, item) => sum + (item.raised || 0), 0) || 0
+              }
+            });
+            break;
+            
+          case "collections":
+            response = await API.get("/charities/admin/list", {
+              params: { status: "all", limit: 100, page: 1 }
+            });
+            const collections = response.data.items || response.data || [];
+            setReportData({
+              collections,
+              summary: {
+                count: collections.length,
+                totalGoal: collections.reduce((sum, item) => sum + (item.goal || 0), 0),
+                totalRaised: collections.reduce((sum, item) => sum + (item.raised || 0), 0),
+                completionRate: collections.length ? 
+                  collections.reduce((sum, item) => sum + (item.raised || 0), 0) / 
+                  collections.reduce((sum, item) => sum + (item.goal || 1), 0) : 0
+              }
+            });
+            break;
+            
+          case "finance":
+            response = await API.get("/payments/stats", {
+              params: { period }
+            });
+            setReportData({
+              monthlyData: [
+                {
+                  month: new Date().toISOString().slice(0, 7),
+                  donationsUSD: response.data.totalAmount || 0,
+                  count: response.data.count || 0
+                }
+              ],
+              summary: {
+                totalAmount: response.data.totalAmount || 0,
+                count: response.data.count || 0,
+                avgAmount: response.data.avgAmount || 0
+              },
+              periodStart: response.data.startDate,
+              periodEnd: response.data.endDate
+            });
+            break;
+            
+          default:
+            setReportData(null);
+        }
+      } catch (err) {
+        console.error("Error fetching report data:", err);
+        setError("Failed to load report data. Please try again.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchReportData();
+  }, [active, period]);
+
+  const handleGenerateReport = async () => {
+    if (!active) return;
+    
+    setLoading(true);
+    setError("");
+    try {
+      const response = await API.post("/reports/generate", {
+        type: active,
+        period,
+        filters
+      });
+      
+      setReportData(response.data.data);
+    } catch (err) {
+      console.error("Error generating report:", err);
+      setError("Failed to generate report. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="rp-page">
@@ -181,6 +383,8 @@ export default function Reports() {
         </div>
       </header>
 
+      {error && <div className="alert error">{error}</div>}
+
       {/* Cards */}
       <section className="rp-grid">
         {REPORTS.map(card => (
@@ -189,13 +393,45 @@ export default function Reports() {
             <div className="rpt-meta">
               <h3 className="rpt-title">{card.title}</h3>
               <p className="rpt-blurb">{card.blurb}</p>
-              <button className="rpt-btn" onClick={() => setActive(card.key)}>
-                <span className="rpt-btn-i"><IconEye /></span> View
+              <button 
+                className="rpt-btn" 
+                onClick={() => setActive(card.key)}
+                disabled={loading}
+              >
+                {loading && active === card.key ? (
+                  <span className="rpt-btn-i"><IconLoading /></span>
+                ) : (
+                  <span className="rpt-btn-i"><IconEye /></span>
+                )}
+                {loading && active === card.key ? "Loading..." : "View"}
               </button>
             </div>
           </article>
         ))}
       </section>
+
+      {/* Period Selector (shown when a report is active) */}
+      {active && (
+        <div className="rp-controls">
+          <label>
+            Period:
+            <select value={period} onChange={(e) => setPeriod(e.target.value)}>
+              <option value="day">Last 24 Hours</option>
+              <option value="week">Last Week</option>
+              <option value="month">Last Month</option>
+              <option value="year">Last Year</option>
+              <option value="all">All Time</option>
+            </select>
+          </label>
+          <button 
+            className="rpt-btn primary" 
+            onClick={handleGenerateReport}
+            disabled={loading}
+          >
+            {loading ? "Generating..." : "Generate Report"}
+          </button>
+        </div>
+      )}
 
       {/* Modal */}
       <div className={`rpt-modal ${active ? "rpt-show" : ""}`} aria-hidden={!active}>
@@ -209,6 +445,18 @@ export default function Reports() {
               <div>
                 <h3 id="rpt-head-title">{preview.title}</h3>
                 <p className="rpt-modal__sub">{preview.subtitle}</p>
+                
+                {/* Summary Stats */}
+                {Object.keys(preview.summary).length > 0 && (
+                  <div className="rpt-summary">
+                    {Object.entries(preview.summary).map(([key, value]) => (
+                      <div key={key} className="rpt-summary-item">
+                        <span className="rpt-summary-label">{key}:</span>
+                        <span className="rpt-summary-value">{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="rpt-modal__actions">
                 <button

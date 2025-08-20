@@ -16,12 +16,23 @@ const IconUnpub = () => (<svg viewBox="0 0 24 24"><path d="M19 13H5v-2h14v2z"/><
 
 const CATEGORIES = ["Education", "Health", "Water", "Food", "Empowerment"];
 
-/* Axios instance with env baseURL (already includes /api in your env) + bearer (optional) */
-const API_URL = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
-const api = axios.create({ baseURL: API_URL });
-api.interceptors.request.use((cfg) => {
-  const token = localStorage.getItem("token");
-  if (token) cfg.headers.Authorization = `Bearer ${token}`;
+/* ---------- API Configuration ---------- */
+const LOCAL_BASE =
+  (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api").replace(/\/$/, "");
+const DEPLOY_BASE =
+  (import.meta.env.VITE_API_DEPLOY_URL || "https://charity-backend-30xl.onrender.com/api").replace(/\/$/, "");
+
+// If the app runs on localhost, use local API; otherwise use deployed API.
+const isLocalHost = ["localhost", "127.0.0.1", ""].includes(window.location.hostname);
+const BASE = isLocalHost ? LOCAL_BASE : DEPLOY_BASE;
+
+// Create axios instance with base URL
+const API = axios.create({ baseURL: BASE });
+
+// Attach token from sessionStorage
+API.interceptors.request.use((cfg) => {
+  const t = sessionStorage.getItem("token") || localStorage.getItem('token');
+  if (t) cfg.headers.Authorization = `Bearer ${t}`;
   return cfg;
 });
 
@@ -58,7 +69,7 @@ export default function Charities() {
     setLoading(true);
     setError("");
     try {
-      const { data } = await api.get("/charities/admin/list", {
+      const { data } = await API.get("/charities/admin/list", {
         params: { q, status, page, limit },
       });
       setRows(normalizeMany(data));
@@ -95,7 +106,7 @@ export default function Charities() {
       fetchRows({ q, status, page: 1, limit });
     }, 300);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks-exhaustive-deps
   }, [q]);
 
   const filtered = useMemo(() => {
@@ -132,11 +143,11 @@ export default function Charities() {
     try {
       setSaving(true);
       if (editing.id) {
-        const { data } = await api.put(`/charities/${editing.id}`, editing);
+        const { data } = await API.put(`/charities/${editing.id}`, editing);
         const updated = normalizeOne(data);
         setRows((rs) => rs.map((r) => (r.id === editing.id ? updated : r)));
       } else {
-        const { data } = await api.post("/charities", editing);
+        const { data } = await API.post("/charities", editing);
         const created = normalizeOne(data);
         setRows((rs) => [created, ...rs]);
       }
@@ -153,7 +164,7 @@ export default function Charities() {
     if (!confirm("Delete this charity?")) return;
     try {
       setDeletingId(id);
-      await api.delete(`/charities/${id}`);
+      await API.delete(`/charities/${id}`);
       setRows((rs) => rs.filter((r) => r.id !== id));
     } catch (e) {
       console.error(e);
@@ -168,7 +179,7 @@ export default function Charities() {
     // optimistic UI
     setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, status: newStatus } : r)));
     try {
-      await api.put(`/charities/${row.id}`, { ...row, status: newStatus });
+      await API.put(`/charities/${row.id}`, { ...row, status: newStatus });
     } catch (e) {
       console.error(e);
       // revert if failed
@@ -184,7 +195,7 @@ export default function Charities() {
       setUploading(true);
       const fd = new FormData();
       fd.append("file", file);
-      const { data } = await api.post("/upload", fd, {
+      const { data } = await API.post("/upload", fd, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       const uploadedUrl = data?.url || "";
@@ -292,7 +303,7 @@ export default function Charities() {
               })}
               {filtered.length === 0 && !loading && (
                 <tr>
-                  <td colSpan="6">
+                  <td colSpan="7">
                     <div className="empty">No charities found.</div>
                   </td>
                 </tr>

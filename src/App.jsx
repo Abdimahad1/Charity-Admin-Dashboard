@@ -13,7 +13,7 @@ import Donations from './admin/pages/Donations.jsx';
 import Reports from './admin/pages/Reports.jsx';
 import Volunteers from './admin/pages/Volunteers.jsx';
 import Homepage from './admin/pages/Homepage.jsx';
-import Settings from './admin/pages/Settings.jsx';
+import Users from './admin/pages/Users.jsx';
 
 export default function App() {
   return (
@@ -41,7 +41,7 @@ export default function App() {
         <Route path="reports" element={<Reports />} />
         <Route path="volunteers" element={<Volunteers />} />
         <Route path="homepage" element={<Homepage />} />
-        <Route path="settings" element={<Settings />} />
+        <Route path="Users" element={<Users />} />
        
       </Route>
 

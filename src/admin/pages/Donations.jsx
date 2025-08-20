@@ -1,6 +1,27 @@
 // src/admin/pages/Donations.jsx
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import axios from "axios";
 import "../../styles/Donations.css";
+
+/* ---------- API Configuration ---------- */
+const LOCAL_BASE =
+  (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api").replace(/\/$/, "");
+const DEPLOY_BASE =
+  (import.meta.env.VITE_API_DEPLOY_URL || "https://charity-backend-30xl.onrender.com/api").replace(/\/$/, "");
+
+// If the app runs on localhost, use local API; otherwise use deployed API.
+const isLocalHost = ["localhost", "127.0.0.1", ""].includes(window.location.hostname);
+const BASE = isLocalHost ? LOCAL_BASE : DEPLOY_BASE;
+
+// Create axios instance with base URL
+const API = axios.create({ baseURL: BASE });
+
+// Attach token from sessionStorage
+API.interceptors.request.use((cfg) => {
+  const t = sessionStorage.getItem("token") || localStorage.getItem('token');
+  if (t) cfg.headers.Authorization = `Bearer ${t}`;
+  return cfg;
+});
 
 /* ---------- Inline icons (theme-friendly) ---------- */
 const I = ({ children }) => <span className="i-bubble">{children}</span>;
@@ -29,79 +50,145 @@ const IconClose = () => (
   <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
 );
 
-/* ---------- Mock data (replace with API) ---------- */
-const SEED = [
-  { id: "d1", name: "Amina Noor",   email: "amina@example.com", phone: "61xxxxxxx", amount: 25,  currency: "USD", method: "EVC",    status: "success", reference: "EV-90123", date: "2025-08-10T10:12:00Z", note: "For clean water" },
-  { id: "d2", name: "Yusuf Khalid", email: "yusuf@example.com", phone: "65xxxxxxx", amount: 500, currency: "SOS", method: "EDAHAB", status: "pending", reference: "ED-45211", date: "2025-08-11T08:02:00Z", note: "" },
-  { id: "d3", name: "Hodan Ali",    email: "hodan@example.com", phone: "66xxxxxxx", amount: 10,  currency: "USD", method: "EVC",    status: "success", reference: "EV-44920", date: "2025-08-11T12:44:00Z", note: "General fund" },
-  { id: "d4", name: "Omar Faruk",   email: "omar@example.com",  phone: "61xxxxxxx", amount: 100, currency: "USD", method: "EDAHAB", status: "failed",  reference: "ED-22118", date: "2025-08-09T14:22:00Z", note: "" },
-  { id: "d5", name: "Leila Ahmed",  email: "leila@example.com", phone: "65xxxxxxx", amount: 60,  currency: "USD", method: "EVC",    status: "success", reference: "EV-55531", date: "2025-08-11T15:11:00Z", note: "Back-to-School" },
-];
-
 export default function Donations() {
   const [q, setQ] = useState("");
-  const [method, setMethod] = useState("all");     // all | EVC | EDAHAB
-  const [currency, setCurrency] = useState("all"); // all | USD | SOS
-  const [status, setStatus] = useState("all");     // all | success | pending | failed | refunded
-  const [detail, setDetail] = useState(null);      // donation row for modal
+  const [method, setMethod] = useState("all");
+  const [currency, setCurrency] = useState("all");
+  const [status, setStatus] = useState("all");
+  const [detail, setDetail] = useState(null);
+  const [payments, setPayments] = useState({
+    items: [],
+    total: 0,
+    totalPages: 0,
+    page: 1,
+    limit: 50
+  });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const filtered = useMemo(() => {
-    return SEED.filter(d => {
-      if (q && !(d.name.toLowerCase().includes(q.toLowerCase()) || d.reference.toLowerCase().includes(q.toLowerCase()))) return false;
-      if (method !== "all" && d.method !== method) return false;
-      if (currency !== "all" && d.currency !== currency) return false;
-      if (status !== "all" && d.status !== status) return false;
-      return true;
-    });
-  }, [q, method, currency, status]);
+  // Fetch payments from API
+  useEffect(() => {
+    const fetchPayments = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await API.get("/payments/admin", {
+          params: { 
+            q, 
+            status: status !== 'all' ? status : undefined,
+            method: method !== 'all' ? method : undefined,
+            currency: currency !== 'all' ? currency : undefined,
+            page: payments.page,
+            limit: payments.limit
+          }
+        });
+        
+        console.log("API Response:", response.data);
+        
+        // Ensure the response data has the expected structure
+        if (response.data && Array.isArray(response.data.items)) {
+          setPayments(response.data);
+        } else {
+          // Handle case where response might be different structure
+          setPayments({ 
+            items: Array.isArray(response.data) ? response.data : [],
+            total: response.data?.total || response.data?.length || 0,
+            totalPages: response.data?.totalPages || 1,
+            page: response.data?.page || 1,
+            limit: response.data?.limit || 50
+          });
+        }
+      } catch (err) {
+        console.error("API Error:", err);
+        setError(err.response?.data?.message || "Failed to fetch payments. Check console for details.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchPayments();
+  }, [q, method, currency, status, payments.page, payments.limit]);
 
   /* KPIs */
   const now = new Date();
-  const isSameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-  const isSameMonth = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
+  const isSameDay = (a, b) => a.getFullYear() === b.getFullYear() && 
+                            a.getMonth() === b.getMonth() && 
+                            a.getDate() === b.getDate();
+  const isSameMonth = (a, b) => a.getFullYear() === b.getFullYear() && 
+                              a.getMonth() === b.getMonth();
 
-  const todaysTotal = filtered
-    .filter(d => isSameDay(new Date(d.date), now) && d.status === "success")
-    .reduce((s, d) => s + d.amount, 0);
+  // Safely calculate KPIs
+  const todaysTotal = (payments.items || [])
+    .filter(p => p.createdAt && isSameDay(new Date(p.createdAt), now) && p.status === "success")
+    .reduce((s, p) => s + (p.amount || 0), 0);
 
-  const mtdTotal = filtered
-    .filter(d => isSameMonth(new Date(d.date), now) && d.status === "success")
-    .reduce((s, d) => s + d.amount, 0);
+  const mtdTotal = (payments.items || [])
+    .filter(p => p.createdAt && isSameMonth(new Date(p.createdAt), now) && p.status === "success")
+    .reduce((s, p) => s + (p.amount || 0), 0);
 
-  const count = filtered.length;
+  const count = (payments.items || []).length;
   const successRate = (() => {
-    const ok = filtered.filter(d => d.status === "success").length || 0;
+    const ok = (payments.items || []).filter(p => p.status === "success").length || 0;
     return count ? Math.round((ok / count) * 100) : 0;
   })();
 
   /* Helpers */
   const money = (v, c = "USD") => {
-    try { return new Intl.NumberFormat(undefined, { style: "currency", currency: c, minimumFractionDigits: 0 }).format(v); }
-    catch { return `${v} ${c}`; }
+    try { 
+      return new Intl.NumberFormat(undefined, { 
+        style: "currency", 
+        currency: c, 
+        minimumFractionDigits: 0 
+      }).format(v); 
+    } catch { 
+      return `${v} ${c}`; 
+    }
   };
 
   const exportCSV = () => {
-    const cols = ["reference","name","phone","email","method","currency","amount","status","date","note"];
-    const rows = filtered.map(d => [
-      d.reference, d.name, d.phone, d.email, d.method, d.currency, d.amount, d.status, d.date, (d.note || "").replace(/\n/g," ")
+    const cols = ["reference","name","phone","email","method","currency","amount","status","createdAt","note"];
+    const rows = payments.items.map(p => [
+      p.reference, 
+      p.name || "Anonymous", 
+      p.phone, 
+      p.email || "", 
+      p.method, 
+      p.currency, 
+      p.amount, 
+      p.status, 
+      p.createdAt, 
+      (p.note || "").replace(/\n/g," ")
     ]);
     const csv = [cols.join(","), ...rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(","))].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     const stamp = new Date().toISOString().slice(0,10);
-    a.download = `donations-${stamp}.csv`;
+    a.download = `payments-${stamp}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
   };
+
+  if (loading) return (
+    <div className="content-pad">
+      <div className="loading-spinner">Loading payments...</div>
+    </div>
+  );
+  
+  if (error) return (
+    <div className="content-pad error">
+      <p>{error}</p>
+      <button onClick={() => window.location.reload()}>Retry</button>
+    </div>
+  );
 
   return (
     <div className="content-pad donations">
       {/* Head */}
       <div className="don-head">
         <div>
-          <h2 className="don-title">Donations</h2>
-          <p className="don-sub">Track supporters, payment methods, and statuses.</p>
+          <h2 className="don-title">Payments</h2>
+          <p className="don-sub">Track payment methods and statuses.</p>
         </div>
         <div className="head-actions">
           <button className="btn ghost" onClick={exportCSV}><I><IconExport /></I> Export CSV</button>
@@ -113,7 +200,7 @@ export default function Donations() {
         <div className="kpi kpi-1">
           <I><IconMoney /></I>
           <div className="kpi-meta">
-            <div className="kpi-label">Today’s Donations</div>
+            <div className="kpi-label">Today's Payments</div>
             <div className="kpi-value">{money(todaysTotal, "USD")}</div>
           </div>
         </div>
@@ -144,24 +231,27 @@ export default function Donations() {
       <div className="card don-filters">
         <div className="field search">
           <I><IconSearch /></I>
-          <input placeholder="Search by name or reference…" value={q} onChange={(e)=>setQ(e.target.value)} />
+          <input 
+            placeholder="Search by name or reference..." 
+            value={q} 
+            onChange={(e) => setQ(e.target.value)} 
+          />
         </div>
-        <select value={method} onChange={e=>setMethod(e.target.value)}>
+        <select value={method} onChange={(e) => setMethod(e.target.value)}>
           <option value="all">All methods</option>
           <option value="EVC">EVC Plus</option>
           <option value="EDAHAB">E-Dahab</option>
         </select>
-        <select value={currency} onChange={e=>setCurrency(e.target.value)}>
+        <select value={currency} onChange={(e) => setCurrency(e.target.value)}>
           <option value="all">All currencies</option>
           <option value="USD">USD</option>
           <option value="SOS">SOS</option>
         </select>
-        <select value={status} onChange={e=>setStatus(e.target.value)}>
+        <select value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="all">All status</option>
           <option value="success">Success</option>
           <option value="pending">Pending</option>
           <option value="failed">Failed</option>
-          <option value="refunded">Refunded</option>
         </select>
       </div>
 
@@ -179,61 +269,83 @@ export default function Donations() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map(d => (
-              <tr key={d.id} onClick={()=>setDetail(d)} className="row-link">
+            {payments.items.map(p => (
+              <tr key={p._id} onClick={() => setDetail(p)} className="row-link">
                 <td>
                   <div className="donor">
-                    <div className="avatar">{(d.name || "?").charAt(0).toUpperCase()}</div>
+                    <div className="avatar">{(p.name || "?").charAt(0).toUpperCase()}</div>
                     <div className="info">
-                      <strong>{d.name}</strong>
-                      <small className="muted">{d.email || d.phone}</small>
+                      <strong>{p.name || "Anonymous"}</strong>
+                      <small className="muted">{p.email || p.phone || "No contact"}</small>
                     </div>
                   </div>
                 </td>
-                <td><strong>{money(d.amount, d.currency)}</strong></td>
+                <td><strong>{money(p.amount, p.currency)}</strong></td>
                 <td>
-                  <span className={`method m-${d.method.toLowerCase()}`}>
-                    <I>{d.method === "EVC" ? <IconEVC/> : <IconEDahab/>}</I>
-                    {d.method}
+                  <span className={`method m-${p.method?.toLowerCase()}`}>
+                    <I>{p.method === "EVC" ? <IconEVC/> : <IconEDahab/>}</I>
+                    {p.method}
                   </span>
                 </td>
-                <td><span className={`status st-${d.status}`}>{d.status}</span></td>
-                <td className="muted">{d.reference}</td>
-                <td className="muted">{new Date(d.date).toLocaleString()}</td>
+                <td><span className={`status st-${p.status}`}>{p.status}</span></td>
+                <td className="muted">{p.reference}</td>
+                <td className="muted">{p.createdAt ? new Date(p.createdAt).toLocaleString() : "N/A"}</td>
               </tr>
             ))}
-            {filtered.length === 0 && (
-              <tr><td colSpan="6" className="empty">No donations match your filters.</td></tr>
+            {payments.items.length === 0 && (
+              <tr><td colSpan="6" className="empty">No payments found.</td></tr>
             )}
           </tbody>
         </table>
       </div>
 
-      {/* Details Modal (white card) */}
+      {/* Pagination */}
+      {payments.totalPages > 1 && (
+        <div className="pagination">
+          <button 
+            disabled={payments.page <= 1}
+            onClick={() => setPayments({...payments, page: payments.page - 1})}
+          >
+            Previous
+          </button>
+          <span>Page {payments.page} of {payments.totalPages}</span>
+          <button 
+            disabled={payments.page >= payments.totalPages}
+            onClick={() => setPayments({...payments, page: payments.page + 1})}
+          >
+            Next
+          </button>
+        </div>
+      )}
+
+      {/* Details Modal */}
       {detail && (
-        <div className="modal show" onClick={()=>setDetail(null)}>
-          <div className="modal-card" onClick={(e)=>e.stopPropagation()}>
-            <button className="modal-close" onClick={()=>setDetail(null)} aria-label="Close">
+        <div className="modal show" onClick={() => setDetail(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setDetail(null)} aria-label="Close">
               <IconClose />
             </button>
 
             <header className="modal-head">
-              <h3>Donation Details</h3>
+              <h3>Payment Details</h3>
               <span className={`status st-${detail.status}`}>{detail.status}</span>
             </header>
 
             <div className="modal-body">
-              <div className="pair"><span>Donor</span><strong>{detail.name}</strong></div>
+              <div className="pair"><span>Donor</span><strong>{detail.name || "Anonymous"}</strong></div>
               <div className="pair"><span>Contact</span><strong>{detail.email || detail.phone || "—"}</strong></div>
               <div className="pair"><span>Amount</span><strong>{money(detail.amount, detail.currency)}</strong></div>
               <div className="pair"><span>Method</span><strong>{detail.method}</strong></div>
               <div className="pair"><span>Reference</span><strong>{detail.reference}</strong></div>
-              <div className="pair"><span>Date</span><strong>{new Date(detail.date).toLocaleString()}</strong></div>
+              <div className="pair"><span>Date</span><strong>{detail.createdAt ? new Date(detail.createdAt).toLocaleString() : "N/A"}</strong></div>
               <div className="pair"><span>Note</span><strong className="note">{detail.note || "—"}</strong></div>
+              {detail.providerReference && (
+                <div className="pair"><span>Provider Ref</span><strong>{detail.providerReference}</strong></div>
+              )}
             </div>
 
             <footer className="modal-actions">
-              <button className="btn" onClick={()=>setDetail(null)}>Close</button>
+              <button className="btn" onClick={() => setDetail(null)}>Close</button>
             </footer>
           </div>
         </div>

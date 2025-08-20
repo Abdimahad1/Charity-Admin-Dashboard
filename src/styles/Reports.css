@@ -126,3 +126,142 @@
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* ===== Alert message ===== */
+.alert {
+  padding: .8rem 1rem;
+  border-radius: 12px;
+  font-weight: 500;
+  margin-bottom: 1rem;
+  border: 1px solid transparent;
+}
+
+.alert.error {
+  background-color: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+/* ===== Controls section ===== */
+.rp-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 1rem;
+}
+
+.rp-controls label {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  color: var(--a-muted);
+  font-weight: 500;
+}
+
+.rp-controls select {
+  padding: .5rem .8rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  cursor: pointer;
+}
+
+.rp-controls select:focus {
+  outline: none;
+  border-color: rgba(15, 108, 255, 0.5);
+}
+
+/* ===== Summary statistics ===== */
+.rpt-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.rpt-summary-item {
+  display: flex;
+  flex-direction: column;
+  padding: .7rem 1rem;
+  background: #f8fafc;
+  border-radius: 10px;
+  min-width: 100px;
+}
+
+.rpt-summary-label {
+  font-size: .8rem;
+  color: #6b7280;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.rpt-summary-value {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #0f6cff;
+  margin-top: .2rem;
+}
+
+/* ===== Loading spinner animation ===== */
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+/* ===== Button states ===== */
+.rpt-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+.rpt-btn:disabled:hover {
+  filter: none !important;
+}
+
+/* ===== Responsive adjustments ===== */
+@media (max-width: 768px) {
+  .rp-controls {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .rpt-summary {
+    flex-direction: column;
+    gap: .5rem;
+  }
+  
+  .rpt-summary-item {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    min-width: auto;
+  }
+}
+
+/* ===== Print styles for PDF generation ===== */
+@media print {
+  .rpt-modal__close,
+  .rpt-modal__actions {
+    display: none !important;
+  }
+  
+  .rpt-modal__card {
+    box-shadow: none !important;
+    transform: none !important;
+  }
+  
+  .rpt-tablewrap {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+}

@@ -50,8 +50,8 @@ export default function AdminSidebar() {
 
   return (
     <>
-      {/* Floating icon menu button (mobile only, hidden when drawer open) */}
-      {isMobile && !sidebarOpen && (
+      {/* Floating icon menu button (mobile only) */}
+      {isMobile && (
         <button
           className="mobile-menu-button"
           onClick={toggleSidebar}
@@ -65,10 +65,10 @@ export default function AdminSidebar() {
         </button>
       )}
 
-      {/* Sidebar wrapper (CSS targets .admin-sidebar for slide-in) */}
+      {/* Sidebar */}
       <aside
         id="admin-sidebar"
-        className={`admin-sidebar ${isMobile && sidebarOpen ? "open" : ""}`}
+        className={`admin-sidebar ${sidebarOpen ? "open" : ""}`}
         {...(isMobile ? { role: "dialog", "aria-modal": true } : {})}
       >
         {/* Optional close icon header (mobile) */}
@@ -89,7 +89,7 @@ export default function AdminSidebar() {
           </div>
         )}
 
-        {/* Brand (optional) */}
+        {/* Brand */}
         <div className="admin-brand">
           <span className="dot" />
           <span>Admin</span>
@@ -155,13 +155,13 @@ export default function AdminSidebar() {
           </NavLink>
 
           <div className="a-section">Settings</div>
-          <NavLink to="/admin/settings" className="a-link" onClick={closeOnMobile}>
+          <NavLink to="/admin/Users" className="a-link" onClick={closeOnMobile}>
             <Icon>
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M19.14 12.94a7.48 7.48 0 000-1.88l2.03-1.58-2-3.46-2.39.5a7.52 7.52 0 00-1.62-.94l-.36-2.46h-4l-.36 2.46a7.52 7.52 0 00-1.62.94l-2.39-.5-2 3.46 2.03 1.58a7.48 7.48 0 000 1.88L2.83 14.5l2 3.46 2.39-.5c.5.39 1.05.71 1.62.94l.36 2.46h4l.36-2.46c.57-.23 1.12-.55 1.62-.94l2.39.5 2-3.46-2.03-1.56zM12 15.5A3.5 3.5 0 1115.5 12 3.5 3.5 0 0112 15.5z" />
               </svg>
             </Icon>
-            <span>Settings</span>
+            <span>Users</span>
           </NavLink>
 
           {/* Logout Button */}

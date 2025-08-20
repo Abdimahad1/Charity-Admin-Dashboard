@@ -307,3 +307,44 @@
   padding:0; 
 }
 
+/* Notification styles */
+.va-notification {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  padding: 12px 20px;
+  border-radius: 8px;
+  color: white;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  animation: slideIn 0.3s ease;
+}
+
+.va-notification--success {
+  background-color: #4caf50;
+}
+
+.va-notification--error {
+  background-color: #f44336;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Link style */
+.va-link {
+  color: #0066cc;
+  text-decoration: underline;
+}
+
+.va-link:hover {
+  color: #004499;
+}

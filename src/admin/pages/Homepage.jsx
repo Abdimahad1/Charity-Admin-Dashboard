@@ -154,7 +154,11 @@ export default function Homepage() {
       setSaving(true);
       const fd = new FormData();
       fd.append("file", form.file);
-      const up = await API.post("/upload/image", fd); // Updated line: let Axios set headers
+      const up = await API.post("/upload/image", fd, {
+        headers: {
+          "Content-Type": "multipart/form-data" // Updated line
+        }
+      });
       const url = up.data?.url;
 
       const payload = {
