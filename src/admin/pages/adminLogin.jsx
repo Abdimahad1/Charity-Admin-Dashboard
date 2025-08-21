@@ -59,7 +59,7 @@ const AdminLogin = () => {
       } catch (err) {
         console.warn('Local API failed, retrying with deployed API...');
         res = await axios.post(
-          'https://charity-backend-30xl.onrender.com/api',
+          'https://charity-backend-30xl.onrender.com/api/auth/admin-login',
           form
         );
       }
