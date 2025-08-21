@@ -14,6 +14,26 @@ import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import axios from 'axios';
 
+/* ---------- API Configuration ---------- */
+const LOCAL_BASE =
+  (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api").replace(/\/$/, "");
+const DEPLOY_BASE =
+  (import.meta.env.VITE_API_DEPLOY_URL || "https://charity-backend-30xl.onrender.com/api").replace(/\/$/, "");
+
+// If the app runs on localhost, use local API; otherwise use deployed API.
+const isLocalHost = ["localhost", "127.0.0.1", ""].includes(window.location.hostname);
+const BASE = isLocalHost ? LOCAL_BASE : DEPLOY_BASE;
+
+// Create axios instance with base URL
+const API = axios.create({ baseURL: BASE });
+
+// Attach token from sessionStorage
+API.interceptors.request.use((cfg) => {
+  const t = sessionStorage.getItem("token") || localStorage.getItem('token');
+  if (t) cfg.headers.Authorization = `Bearer ${t}`;
+  return cfg;
+});
+
 const AdminLogin = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -49,20 +69,7 @@ const AdminLogin = () => {
     sessionStorage.clear();
 
     try {
-      // First try local
-      let res;
-      try {
-        res = await axios.post(
-          `${import.meta.env.VITE_API_BASE_URL}/api/auth/admin-login`,
-          form
-        );
-      } catch (err) {
-        console.warn('Local API failed, retrying with deployed API...');
-        res = await axios.post(
-          'https://charity-backend-30xl.onrender.com/api/auth/admin-login',
-          form
-        );
-      }
+      const res = await API.post('/auth/admin-login', form);
 
       const userRole = res.data?.user?.role;
       if (userRole !== 'Admin') {
