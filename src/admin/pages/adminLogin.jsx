@@ -18,7 +18,7 @@ import axios from 'axios';
 const LOCAL_BASE =
   (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api").replace(/\/$/, "");
 const DEPLOY_BASE =
-  (import.meta.env.VITE_API_DEPLOY_URL || "https://charity-backend-30xl.onrender.com/api").replace(/\/$/, "");
+  (import.meta.env.VITE_API_DEPLOY_URL || "https://charity-backend-c05j.onrender.com/api").replace(/\/$/, "");
 
 // If the app runs on localhost, use local API; otherwise use deployed API.
 const isLocalHost = ["localhost", "127.0.0.1", ""].includes(window.location.hostname);
