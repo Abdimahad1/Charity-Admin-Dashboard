@@ -2,6 +2,103 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import "../../styles/Homepage.css";
 import axios from "axios";
 
+/* ---------------------------------------
+   API base detection (local vs deployed)
+---------------------------------------- */
+const isLocalHost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+const LOCAL_BASE = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api").replace(/\/$/, "");
+const DEPLOY_BASE = (import.meta.env.VITE_API_DEPLOY_URL || import.meta.env.VITE_API_DEPLOY || "https://charity-backend-c05j.onrender.com/api").replace(/\/$/, "");
+const API_BASE = import.meta.env.PROD ? DEPLOY_BASE : (isLocalHost ? LOCAL_BASE : DEPLOY_BASE);
+const API_ORIGIN = API_BASE.replace(/\/api(?:\/.*)?$/, "");
+
+/* ---------------------------------------
+   Axios instance + interceptors
+---------------------------------------- */
+const API = axios.create({
+  baseURL: API_BASE,
+  timeout: 20000,
+  withCredentials: false // we use Bearer token via header
+});
+
+API.interceptors.request.use((cfg) => {
+  const t = sessionStorage.getItem("token");
+  if (t) cfg.headers.Authorization = `Bearer ${t}`;
+  return cfg;
+});
+
+API.interceptors.response.use(
+  (r) => r,
+  (error) => {
+    // Helpful logging for 502 / network errors
+    if (error?.response) {
+      console.error(`[API ${error.response.status}]`, error.config?.url, error.response?.data || error.message);
+    } else {
+      console.error(`[API error]`, error?.message || error);
+    }
+    return Promise.reject(error);
+  }
+);
+
+/* ---------------------------------------
+   URL helpers (match your site Home page)
+---------------------------------------- */
+const absolutizeUploadUrl = (u) => {
+  if (!u) return "";
+  let s = String(u).trim().replace(/\\/g, "/");
+  if (/^https?:\/\//i.test(s) || /^data:|^blob:/i.test(s)) return s;
+  if (!s.startsWith("/")) s = `/${s}`;
+  // remove any accidental leading /api before /uploads
+  s = s.replace(/^\/api(?=\/uploads\/)/i, "");
+  // map plain /images/foo.webp → /uploads/images/foo.webp
+  if (/^\/images\//i.test(s)) s = `/uploads${s}`;
+  if (/^\/[^/]+\.(jpg|jpeg|png|gif|webp|avif)$/i.test(s)) s = `/uploads/images${s}`;
+  if (/^\/uploads\//i.test(s)) return `${API_ORIGIN}${s}`;
+  return `${API_ORIGIN}${s}`;
+};
+
+// Ask backend variant endpoint for width-optimized assets.
+// Accepts any base (absolute or /uploads/…), strips query, adds ?width=
+const responsiveUrl = (url, width, format = "webp") => {
+  if (!url) return "";
+  // if url already points to /api/upload/variant/:filename we keep it
+  // otherwise, convert absolute "/uploads/images/xxx.webp" to "/api/upload/variant/xxx.webp"
+  const abs = absolutizeUploadUrl(url);
+  const m = abs.match(/\/uploads\/images\/([^/?#]+)/i);
+  const baseVariant = m ? `${API_BASE}/upload/variant/${m[1]}` : abs.split("?")[0];
+  return `${baseVariant}?width=${width}&format=${format}`;
+};
+
+const buildSrcSet = (url) => {
+  if (!url) return "";
+  const widths = [320, 480, 640, 768, 1024, 1280, 1536, 1920];
+  return widths.map((w) => `${responsiveUrl(url, w)} ${w}w`).join(", ");
+};
+
+const pickSlideSrc = (s) => {
+  if (s?.src) return absolutizeUploadUrl(s.src);
+  const img0 = Array.isArray(s?.images) ? s.images[0] : undefined;
+  const img0Url = (img0 && typeof img0 === "object") ? (img0.url ?? img0.src ?? img0.path) : img0;
+  const candidate =
+    s?.image ??
+    s?.url ??
+    s?.file?.url ??
+    img0Url ??
+    (s?.filename ? `/uploads/images/${s.filename}` : "");
+  return absolutizeUploadUrl(candidate);
+};
+
+const pickEventCover = (e) => {
+  if (e?.coverImage) return absolutizeUploadUrl(e.coverImage);
+  const img0 = Array.isArray(e?.images) ? e.images[0] : undefined;
+  const img0Url = (img0 && typeof img0 === "object") ? (img0.url ?? img0.src ?? img0.path) : img0;
+  const candidate =
+    e?.cover?.url ??
+    e?.image ??
+    img0Url ??
+    (e?.filename ? `/uploads/images/${e.filename}` : "");
+  return absolutizeUploadUrl(candidate);
+};
+
 /* ---------- Tiny inline icons ---------- */
 const I = ({ children }) => <span className="hm-ib">{children}</span>;
 const IconImage = () => (<svg viewBox="0 0 24 24"><path d="M21 5H3a2 2 0 00-2 2v10a2 2 0 002 2h18a2 2 0 002-2V7a2 2 0 00-2-2zM4 8a2 2 0 114 0 2 2 0 01-4 0zm0 9l5-6 4 4 3-3 4 5H4z"/></svg>);
@@ -16,32 +113,14 @@ const IconEdit = () => (<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81
 const IconChevronLeft = () => (<svg viewBox="0 0 24 24"><path d="M15.41 16.59L10.83 12l4.58-4.59L14 6l-6 6 6 6z"/></svg>);
 const IconChevronRight = () => (<svg viewBox="0 0 24 24"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z"/></svg>);
 
-/* Events icons */
 const IconEvent = () => (<svg viewBox="0 0 24 24"><path d="M19 4h-1V2h-2v2H8V2H6v2H5a3 3 0 00-3 3v11a3 3 0 003 3h14a3 3 0 003-3V7a3 3 0 00-3-3zm1 14a1 1 0 01-1 1H5a1 1 0 01-1-1V10h16v8zM4 8V7a1 1 0 011-1h14a1 1 0 011 1v1H4z"/></svg>);
 const IconCalendar = () => (<svg viewBox="0 0 24 24"><path d="M7 2h2v3H7V2zm8 0h2v3h-2V2zM4 7h16v13a2 2 0 01-2 2H6a2 2 0 01-2-2V7zm3 4h2v2H7v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2z"/></svg>);
 const IconTag = () => (<svg viewBox="0 0 24 24"><path d="M10 3H3v7l8 8 7-7-8-8zm-6 2h4v4H4V5z"/></svg>);
-const IconPin = () => (<svg viewBox="0 0 24 24"><path d="M12 2l4 6h-3v5l2 3H9l2-3V8H8l4-6z"/></svg>);
 
-/* ---------- API instance (auto local vs deployed) ---------- */
-const LOCAL_BASE =
-  (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api").replace(/\/$/, "");
-const DEPLOY_BASE =
-  (import.meta.env.VITE_API_DEPLOY_URL || "https://charity-backend-c05j.onrender.com/api").replace(/\/$/, "");
-
-// If the app runs on localhost, use local API; otherwise use deployed API.
-const isLocalHost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
-const BASE = isLocalHost ? LOCAL_BASE : DEPLOY_BASE;
-
-const API = axios.create({ baseURL: BASE });
-
-// attach token from sessionStorage (matches your AdminLogin)
-API.interceptors.request.use((cfg) => {
-  const t = sessionStorage.getItem("token");
-  if (t) cfg.headers.Authorization = `Bearer ${t}`;
-  return cfg;
-});
-
-export default function Homepage() {
+/* ===================================================================
+   Component
+=================================================================== */
+export default function HomepageAdmin() {
   /* ================= SLIDES ================ */
   const [slides, setSlides] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -49,9 +128,8 @@ export default function Homepage() {
   const [movingId, setMovingId] = useState("");
   const [error, setError] = useState("");
 
-  // edit state
-  const [editingId, setEditingId] = useState("");     // current slide id being edited (if any)
-  const [currentIdx, setCurrentIdx] = useState(0);    // which slide preview arrows are on
+  const [editingId, setEditingId] = useState("");
+  const [currentIdx, setCurrentIdx] = useState(0);
 
   const [form, setForm] = useState({
     title: "",
@@ -61,21 +139,24 @@ export default function Homepage() {
     overlay: 44,
     published: true,
     file: null,
-    preview: "",
+    preview: ""
   });
 
   const fileRef = useRef(null);
 
-  /* ---------- load slides ---------- */
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
         const { data } = await API.get("/slides");
         const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
+        const normalized = items.map((s) => ({
+          ...s,
+          src: pickSlideSrc(s)
+        }));
         if (mounted) {
-          setSlides(items);
-          if (items.length > 0) setCurrentIdx(0);
+          setSlides(normalized);
+          if (normalized.length > 0) setCurrentIdx(0);
         }
       } catch (e) {
         setError("Failed to load homepage slides.");
@@ -87,22 +168,18 @@ export default function Homepage() {
     return () => { mounted = false; };
   }, []);
 
-  const hasPreview = !!form.preview;
   const selectedSlide = slides[currentIdx] || null;
-
-  // The image shown in Live Preview:
   const currentPreview = useMemo(() => {
     if (form.preview) return form.preview;
-    if (editingId && selectedSlide && (selectedSlide._id === editingId || selectedSlide.id === editingId)) {
-      return selectedSlide.src || "";
+    if (editingId) {
+      const s = slides.find((x) => (x._id || x.id) === editingId);
+      if (s?.src) return s.src;
     }
-    const editingSlide = slides.find(s => (s._id || s.id) === editingId);
-    if (editingSlide) return editingSlide.src || "";
     return selectedSlide?.src || "";
-  }, [form.preview, selectedSlide, slides, editingId]);
+  }, [form.preview, editingId, slides, selectedSlide]);
 
-  function onPickFile() { fileRef.current?.click(); }
-  function onFileChange(e) {
+  const onPickFile = () => fileRef.current?.click();
+  const onFileChange = (e) => {
     const f = e.target.files?.[0];
     if (!f) {
       setForm((s) => ({ ...s, file: null, preview: "" }));
@@ -110,9 +187,9 @@ export default function Homepage() {
     }
     const url = URL.createObjectURL(f);
     setForm((s) => ({ ...s, file: f, preview: url }));
-  }
+  };
 
-  function resetForm() {
+  const resetForm = () => {
     setForm({
       title: "",
       subtitle: "",
@@ -121,13 +198,13 @@ export default function Homepage() {
       overlay: 44,
       published: true,
       file: null,
-      preview: "",
+      preview: ""
     });
     setEditingId("");
     if (fileRef.current) fileRef.current.value = "";
-  }
+  };
 
-  function loadSlideIntoForm(idx) {
+  const loadSlideIntoForm = (idx) => {
     const s = slides[idx];
     if (!s) return;
     setCurrentIdx(idx);
@@ -140,10 +217,10 @@ export default function Homepage() {
       overlay: Number(s.overlay ?? 40),
       published: !!s.published,
       file: null,
-      preview: "",
+      preview: ""
     });
     if (fileRef.current) fileRef.current.value = "";
-  }
+  };
 
   async function addSlide(e) {
     e.preventDefault();
@@ -154,12 +231,8 @@ export default function Homepage() {
       setSaving(true);
       const fd = new FormData();
       fd.append("file", form.file);
-      const up = await API.post("/upload/image", fd, {
-        headers: {
-          "Content-Type": "multipart/form-data" // Updated line
-        }
-      });
-      const url = up.data?.url;
+      const up = await API.post("/upload/image", fd); // Axios sets boundary header automatically
+      const url = up.data?.url ? absolutizeUploadUrl(up.data.url) : "";
 
       const payload = {
         title: form.title.trim(),
@@ -168,17 +241,19 @@ export default function Homepage() {
         src: url,
         align: form.align,
         overlay: Number(form.overlay) || 40,
-        published: !!form.published,
+        published: !!form.published
       };
+
       const { data } = await API.post("/slides", payload);
-      setSlides((arr) => [data, ...arr]);
+      const normalized = { ...data, src: pickSlideSrc({ ...data, src: data.src || url }) };
+      setSlides((arr) => [normalized, ...arr]);
       setCurrentIdx(0);
-      setEditingId(data._id || data.id || "");
+      setEditingId(normalized._id || normalized.id || "");
       setForm((s) => ({ ...s, file: null, preview: "" }));
       if (fileRef.current) fileRef.current.value = "";
     } catch (err) {
       console.error(err);
-      alert("Failed to create slide.");
+      alert(err?.response?.data?.message || "Failed to create slide.");
     } finally {
       setSaving(false);
     }
@@ -194,8 +269,8 @@ export default function Homepage() {
       if (form.file) {
         const fd = new FormData();
         fd.append("file", form.file);
-        const up = await API.post("/upload/image", fd); // Updated line
-        newSrc = up.data?.url;
+        const up = await API.post("/upload/image", fd);
+        newSrc = up.data?.url ? absolutizeUploadUrl(up.data.url) : undefined;
       }
 
       const payload = {
@@ -205,21 +280,22 @@ export default function Homepage() {
         align: form.align,
         overlay: Number(form.overlay) || 40,
         published: !!form.published,
-        ...(newSrc ? { src: newSrc } : {}),
+        ...(newSrc ? { src: newSrc } : {})
       };
 
       const { data } = await API.put(`/slides/${editingId}`, payload);
+      const normalized = { ...data, src: pickSlideSrc({ ...data }) };
       setSlides((arr) =>
-        arr.map((s) => ((s._id || s.id) === editingId ? { ...s, ...data } : s))
+        arr.map((s) => ((s._id || s.id) === editingId ? { ...s, ...normalized } : s))
       );
-      const idx = slides.findIndex(s => (s._id || s.id) === editingId);
+      const idx = slides.findIndex((s) => (s._id || s.id) === editingId);
       if (idx >= 0) setCurrentIdx(idx);
       setForm((s) => ({ ...s, file: null, preview: "" }));
       if (fileRef.current) fileRef.current.value = "";
       alert("Slide updated.");
     } catch (err) {
       console.error(err);
-      alert("Failed to update slide.");
+      alert(err?.response?.data?.message || "Failed to update slide.");
     } finally {
       setSaving(false);
     }
@@ -238,7 +314,7 @@ export default function Homepage() {
       }
     } catch (e) {
       console.error(e);
-      alert("Failed to delete slide.");
+      alert(e?.response?.data?.message || "Failed to delete slide.");
     }
   }
 
@@ -254,7 +330,7 @@ export default function Homepage() {
       }
     } catch (e) {
       console.error(e);
-      alert("Failed to update publish state.");
+      alert(e?.response?.data?.message || "Failed to update publish state.");
     }
   }
 
@@ -263,29 +339,19 @@ export default function Homepage() {
     try {
       const { data } = await API.patch(`/slides/${id}/move`, null, { params: { dir } });
       const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
-      setSlides(items);
-      const tgtIndex = items.findIndex((s) => (s._id || s.id) === id);
+      const normalized = items.map((s) => ({ ...s, src: pickSlideSrc(s) }));
+      setSlides(normalized);
+      const tgtIndex = normalized.findIndex((s) => (s._id || s.id) === id);
       if (tgtIndex >= 0) setCurrentIdx(tgtIndex);
     } catch (e) {
       console.error(e);
-      alert("Failed to reorder slide.");
+      alert(e?.response?.data?.message || "Failed to reorder slide.");
     } finally {
       setMovingId("");
     }
   }
   const moveUp = (id) => move(id, "up");
   const moveDown = (id) => move(id, "down");
-
-  function prevPreview() {
-    if (slides.length === 0) return;
-    const nextIdx = (currentIdx - 1 + slides.length) % slides.length;
-    loadSlideIntoForm(nextIdx);
-  }
-  function nextPreview() {
-    if (slides.length === 0) return;
-    const nextIdx = (currentIdx + 1) % slides.length;
-    loadSlideIntoForm(nextIdx);
-  }
 
   /* ================= EVENTS ================ */
   const [events, setEvents] = useState([]);
@@ -302,16 +368,20 @@ export default function Homepage() {
     description: "",
     published: true,
     file: null,
-    preview: "",
+    preview: ""
   });
 
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
-        const { data } = await API.get("/events");
+        const { data } = await API.get("/events"); // admin list
         const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
-        if (mounted) setEvents(items);
+        const normalized = items.map((e) => ({
+          ...e,
+          coverImage: pickEventCover(e)
+        }));
+        if (mounted) setEvents(normalized);
       } catch (e) {
         console.error(e);
       } finally {
@@ -321,8 +391,8 @@ export default function Homepage() {
     return () => { mounted = false; };
   }, []);
 
-  function evPick() { evFileRef.current?.click(); }
-  function evFileChange(e) {
+  const evPick = () => evFileRef.current?.click();
+  const evFileChange = (e) => {
     const f = e.target.files?.[0];
     if (!f) {
       setEvForm((s) => ({ ...s, file: null, preview: "" }));
@@ -330,9 +400,9 @@ export default function Homepage() {
     }
     const url = URL.createObjectURL(f);
     setEvForm((s) => ({ ...s, file: f, preview: url }));
-  }
+  };
 
-  function evReset() {
+  const evReset = () => {
     setEvForm({
       title: "",
       category: "",
@@ -341,14 +411,14 @@ export default function Homepage() {
       description: "",
       published: true,
       file: null,
-      preview: "",
+      preview: ""
     });
     setEvEditingId("");
     if (evFileRef.current) evFileRef.current.value = "";
-  }
+  };
 
   function loadEventIntoForm(id) {
-    const e = events.find(x => (x._id || x.id) === id);
+    const e = events.find((x) => (x._id || x.id) === id);
     if (!e) return;
     setEvEditingId(e._id || e.id || "");
     setEvForm({
@@ -359,7 +429,7 @@ export default function Homepage() {
       description: e.description || e.excerpt || "",
       published: !!e.published,
       file: null,
-      preview: getEventCover(e) || "",
+      preview: pickEventCover(e) || ""
     });
     if (evFileRef.current) evFileRef.current.value = "";
   }
@@ -370,11 +440,10 @@ export default function Homepage() {
     if (!evForm.title.trim()) return alert("Title is required.");
     try {
       setEvSaving(true);
-      // upload
       const fd = new FormData();
       fd.append("file", evForm.file);
-      const up = await API.post("/upload/image", fd); // Updated line
-      const url = up.data?.url;
+      const up = await API.post("/upload/image", fd);
+      const cover = up.data?.url ? absolutizeUploadUrl(up.data.url) : "";
 
       const payload = {
         title: evForm.title.trim(),
@@ -382,16 +451,17 @@ export default function Homepage() {
         date: evForm.date ? new Date(evForm.date).toISOString() : undefined,
         location: evForm.location.trim(),
         description: evForm.description.trim(),
-        coverImage: url,
-        published: !!evForm.published,
+        coverImage: cover,
+        published: !!evForm.published
       };
       const { data } = await API.post("/events", payload);
-      setEvents((arr) => [data, ...arr]);
+      const normalized = { ...data, coverImage: pickEventCover({ ...data }) };
+      setEvents((arr) => [normalized, ...arr]);
       evReset();
       alert("Event created.");
     } catch (err) {
       console.error(err);
-      alert("Failed to create event.");
+      alert(err?.response?.data?.message || "Failed to create event.");
     } finally {
       setEvSaving(false);
     }
@@ -406,8 +476,8 @@ export default function Homepage() {
       if (evForm.file) {
         const fd = new FormData();
         fd.append("file", evForm.file);
-        const up = await API.post("/upload/image", fd); // Updated line
-        newCover = up.data?.url;
+        const up = await API.post("/upload/image", fd);
+        newCover = up.data?.url ? absolutizeUploadUrl(up.data.url) : undefined;
       }
       const payload = {
         title: evForm.title.trim(),
@@ -416,15 +486,16 @@ export default function Homepage() {
         location: evForm.location.trim(),
         description: evForm.description.trim(),
         published: !!evForm.published,
-        ...(newCover ? { coverImage: newCover } : {}),
+        ...(newCover ? { coverImage: newCover } : {})
       };
       const { data } = await API.put(`/events/${evEditingId}`, payload);
-      setEvents((arr) => arr.map((x) => ((x._id || x.id) === evEditingId ? { ...x, ...data } : x)));
+      const normalized = { ...data, coverImage: pickEventCover({ ...data }) };
+      setEvents((arr) => arr.map((x) => ((x._id || x.id) === evEditingId ? { ...x, ...normalized } : x)));
       evReset();
       alert("Event updated.");
     } catch (err) {
       console.error(err);
-      alert("Failed to update event.");
+      alert(err?.response?.data?.message || "Failed to update event.");
     } finally {
       setEvSaving(false);
     }
@@ -438,7 +509,7 @@ export default function Homepage() {
       if (evEditingId === id) evReset();
     } catch (e) {
       console.error(e);
-      alert("Failed to delete event.");
+      alert(e?.response?.data?.message || "Failed to delete event.");
     }
   }
 
@@ -452,7 +523,7 @@ export default function Homepage() {
       if (evEditingId === id) setEvForm((f) => ({ ...f, published: updated.published }));
     } catch (e) {
       console.error(e);
-      alert("Failed to update publish state.");
+      alert(e?.response?.data?.message || "Failed to update publish state.");
     }
   }
 
@@ -464,14 +535,11 @@ export default function Homepage() {
     return Number.isNaN(dt.getTime()) ? "" : dt.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
   };
 
-  const getEventCover = (e) =>
-    e.coverImage ||                // preferred (string)
-    e.cover?.url ||                 // old nested object
-    e.image ||
-    (Array.isArray(e.images) && (e.images[0]?.url || e.images[0])) ||
-    "";
+  const getEventCover = (e) => pickEventCover(e) || "";
 
   /* ================= RENDER ================ */
+  const hasPreview = !!form.preview;
+
   return (
     <div className="hm-page">
       {/* Header */}
@@ -508,13 +576,7 @@ export default function Homepage() {
             </h3>
             <div className="hm-form-tools">
               {editingId ? (
-                <button
-                  type="button"
-                  className="hm-btn hm-btn--ghost"
-                  onClick={resetForm}
-                >
-                  + New
-                </button>
+                <button type="button" className="hm-btn hm-btn--ghost" onClick={resetForm}>+ New</button>
               ) : null}
             </div>
           </div>
@@ -527,7 +589,7 @@ export default function Homepage() {
                 <I><IconImage /></I> {editingId ? "Replace Image" : "Choose Image"}
               </button>
               <span className="hm-filehint">
-                {hasPreview ? "Preview ready" : "JPG/PNG, large landscape works best"}
+                {hasPreview ? "Preview ready" : "JPG/PNG/WEBP, large landscape works best"}
               </span>
             </div>
           </div>
@@ -577,7 +639,7 @@ export default function Homepage() {
             <input
               type="range" min="10" max="80" step="1"
               value={form.overlay}
-              onChange={(e) => setForm((s) => ({ ...s, overlay: e.target.value }))}
+              onChange={(e) => setForm((s) => ({ ...s, overlay: Number(e.target.value) }))}
             />
           </div>
 
@@ -604,25 +666,17 @@ export default function Homepage() {
         <aside className="hm-card hm-preview">
           <div className="hm-preview-head">
             <h3 className="hm-card__title"><I><IconEye /></I> Live Preview</h3>
-            {editingId ? (
-              <div className="hm-muted">Editing: <code>{editingId}</code></div>
-            ) : null}
+            {editingId ? <div className="hm-muted">Editing: <code>{editingId}</code></div> : null}
           </div>
 
           <div
             className={`hm-hero ${form.align}`}
             style={{
-              backgroundImage: `url('${currentPreview}')`,
-              "--hm-overlay": `${(Number(form.overlay) || 40) / 100}`,
+              backgroundImage: `url('${responsiveUrl(currentPreview, 1280)}')`,
+              "--hm-overlay": `${(Number(form.overlay) || 40) / 100}`
             }}
           >
-            <button
-              type="button"
-              className="hm-hero-arrow left"
-              onClick={prevPreview}
-              disabled={slides.length === 0}
-              title="Previous slide"
-            >
+            <button type="button" className="hm-hero-arrow left" onClick={() => currentIdx > 0 && loadSlideIntoForm(currentIdx - 1)} disabled={slides.length === 0} title="Previous slide">
               <IconChevronLeft />
             </button>
 
@@ -641,13 +695,7 @@ export default function Homepage() {
               </div>
             </div>
 
-            <button
-              type="button"
-              className="hm-hero-arrow right"
-              onClick={nextPreview}
-              disabled={slides.length === 0}
-              title="Next slide"
-            >
+            <button type="button" className="hm-hero-arrow right" onClick={() => currentIdx < slides.length - 1 && loadSlideIntoForm(currentIdx + 1)} disabled={slides.length === 0} title="Next slide">
               <IconChevronRight />
             </button>
           </div>
@@ -655,12 +703,7 @@ export default function Homepage() {
           <div className="hm-preview-foot">
             {selectedSlide ? (
               <>
-                <button
-                  type="button"
-                  className="hm-btn"
-                  onClick={() => loadSlideIntoForm(currentIdx)}
-                  title="Load this slide into the form for editing"
-                >
+                <button type="button" className="hm-btn" onClick={() => loadSlideIntoForm(currentIdx)} title="Load this slide into the form for editing">
                   <I><IconEdit /></I> Edit This Slide
                 </button>
                 {!editingId && slides.length > 1 ? (
@@ -689,13 +732,16 @@ export default function Homepage() {
           <ul className="hm-slides">
             {slides.map((s, idx) => {
               const id = s._id || s.id;
+              const thumb = responsiveUrl(s.src, 480);
+              const thumbSet = buildSrcSet(s.src);
               return (
                 <li key={id} className={`hm-slide ${idx === currentIdx ? "is-current" : ""}`}>
                   <button
                     className="hm-thumb"
-                    style={{ backgroundImage: `url('${s.src}')` }}
+                    style={{ backgroundImage: `url('${thumb}')` }}
                     onClick={() => loadSlideIntoForm(idx)}
                     title="Click to load this slide into the form"
+                    aria-label={`Edit ${s.title || "slide"}`}
                   />
                   <div className="hm-slide__meta">
                     <div className="hm-slide__title">{s.title || <span className="hm-muted">(untitled)</span>}</div>
@@ -710,8 +756,8 @@ export default function Homepage() {
                   </div>
 
                   <div className="hm-rowactions">
-                    <button className="hm-iconbtn" disabled={movingId===id} onClick={() => moveUp(id)} title="Move up"><IconUp /></button>
-                    <button className="hm-iconbtn" disabled={movingId===id} onClick={() => moveDown(id)} title="Move down"><IconDown /></button>
+                    <button className="hm-iconbtn" disabled={movingId===id || idx===0} onClick={() => moveUp(id)} title="Move up"><IconUp /></button>
+                    <button className="hm-iconbtn" disabled={movingId===id || idx===slides.length-1} onClick={() => moveDown(id)} title="Move down"><IconDown /></button>
                     <button className={`hm-iconbtn ${s.published ? "on" : ""}`} onClick={() => togglePub(id)} title="Toggle publish"><IconEye /></button>
                     <button className="hm-iconbtn" onClick={() => loadSlideIntoForm(idx)} title="Edit"><IconEdit /></button>
                     <button className="hm-iconbtn danger" onClick={() => removeSlide(id)} title="Delete"><IconTrash /></button>
@@ -764,7 +810,7 @@ export default function Homepage() {
               <button type="button" className="hm-btn" onClick={evPick}>
                 <I><IconImage /></I> {evEditingId ? "Replace Image" : "Choose Image"}
               </button>
-              <span className="hm-filehint">{evForm.preview ? "Preview ready" : "JPG/PNG, landscape recommended"}</span>
+              <span className="hm-filehint">{evForm.preview ? "Preview ready" : "JPG/PNG/WEBP, landscape recommended"}</span>
             </div>
           </div>
 
@@ -779,7 +825,7 @@ export default function Homepage() {
 
           <div className="hm-grid-2">
             <div className="hm-field">
-              <label><I><IconTag /></I> Category</label>
+              <label><IconTag /> Category</label>
               <input
                 value={evForm.category}
                 onChange={(e) => setEvForm((s) => ({ ...s, category: e.target.value }))}
@@ -787,7 +833,7 @@ export default function Homepage() {
               />
             </div>
             <div className="hm-field">
-              <label><I><IconCalendar /></I> Date</label>
+              <label><IconCalendar /> Date</label>
               <input
                 type="date"
                 value={evForm.date}
@@ -812,6 +858,7 @@ export default function Homepage() {
               value={evForm.description}
               onChange={(e) => setEvForm((s) => ({ ...s, description: e.target.value }))}
               placeholder="Short summary that will appear on homepage…"
+              maxLength={300}
             />
             <small className="he-count">{evForm.description.length}/300</small>
           </div>
@@ -876,10 +923,12 @@ export default function Homepage() {
             {events.map((e) => {
               const id = e._id || e.id;
               const cover = getEventCover(e);
+              const coverSmall = cover ? responsiveUrl(cover, 600) : "";
+              const coverSet = cover ? buildSrcSet(cover) : "";
 
               return (
                 <li key={id} className="he-item">
-                  <div className="he-thumb" style={cover ? { backgroundImage: `url(${cover})` } : undefined} />
+                  <div className="he-thumb" style={coverSmall ? { backgroundImage: `url(${coverSmall})` } : undefined} />
                   <div className="he-info">
                     <div className="he-line">
                       <strong className="he-name">{e.title || "(untitled)"}</strong>
