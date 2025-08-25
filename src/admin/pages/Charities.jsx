@@ -1,10 +1,10 @@
-// src/admin/pages/Charities.jsx
 import React, { useMemo, useState, useEffect } from "react";
-import "../../styles/Charities.css";
+import "../../styles/Charities.css"; // Import the CSS file
 import axios from "axios";
+import Swal from "sweetalert2";
 
 /* Minimal inline icons */
-const I = ({ children }) => <span className="i-bubble">{children}</span>;
+const I = ({ children }) => <span className="char-i-bubble">{children}</span>;
 const IconSearch = () => (
   <svg viewBox="0 0 24 24"><path d="M10 2a8 8 0 106.32 3.16L22 8l-4 4-1.68-5.68A8 8 0 0010 2zm0 4a4 4 0 110 8 4 4 0 010-8z"/></svg>
 );
@@ -48,6 +48,24 @@ const normalizeMany = (data) => {
   return arr.map(normalizeOne);
 };
 
+// Toast notifications
+const showToast = (icon, title, message = "") => {
+  Swal.fire({
+    icon,
+    title,
+    text: message,
+    toast: true,
+    position: 'top-end',
+    showConfirmButton: false,
+    timer: 3000,
+    timerProgressBar: true,
+    didOpen: (toast) => {
+      toast.addEventListener('mouseenter', Swal.stopTimer);
+      toast.addEventListener('mouseleave', Swal.resumeTimer);
+    }
+  });
+};
+
 export default function Charities() {
   const [rows, setRows] = useState([]);
   const [q, setQ] = useState("");
@@ -82,6 +100,7 @@ export default function Charities() {
     } catch (e) {
       console.error(e);
       setError("Failed to load charities.");
+      showToast('error', 'Error', 'Failed to load charities.');
     } finally {
       setLoading(false);
     }
@@ -106,7 +125,7 @@ export default function Charities() {
       fetchRows({ q, status, page: 1, limit });
     }, 300);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks-exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
 
   const filtered = useMemo(() => {
@@ -138,37 +157,57 @@ export default function Charities() {
   const openEdit = (row) => setEditing({ ...row });
 
   const save = async () => {
-    if (!editing?.title?.trim()) return alert("Title is required");
-    if (!editing.goal || Number(editing.goal) <= 0) return alert("Goal is required");
+    if (!editing?.title?.trim()) {
+      showToast('warning', 'Title Required', 'Title is required');
+      return;
+    }
+    if (!editing.goal || Number(editing.goal) <= 0) {
+      showToast('warning', 'Goal Required', 'Goal is required and must be greater than 0');
+      return;
+    }
     try {
       setSaving(true);
       if (editing.id) {
         const { data } = await API.put(`/charities/${editing.id}`, editing);
         const updated = normalizeOne(data);
         setRows((rs) => rs.map((r) => (r.id === editing.id ? updated : r)));
+        showToast('success', 'Success', 'Charity updated successfully!');
       } else {
         const { data } = await API.post("/charities", editing);
         const created = normalizeOne(data);
         setRows((rs) => [created, ...rs]);
+        showToast('success', 'Success', 'Charity created successfully!');
       }
       setEditing(null);
     } catch (e) {
       console.error(e);
-      alert("Failed to save charity.");
+      showToast('error', 'Error', e?.response?.data?.message || "Failed to save charity.");
     } finally {
       setSaving(false);
     }
   };
 
   const remove = async (id) => {
-    if (!confirm("Delete this charity?")) return;
+    const result = await Swal.fire({
+      title: 'Are you sure?',
+      text: "You won't be able to revert this!",
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#3085d6',
+      cancelButtonColor: '#d33',
+      confirmButtonText: 'Yes, delete it!'
+    });
+    
+    if (!result.isConfirmed) return;
+    
     try {
       setDeletingId(id);
       await API.delete(`/charities/${id}`);
       setRows((rs) => rs.filter((r) => r.id !== id));
+      showToast('success', 'Deleted', 'Charity has been deleted.');
     } catch (e) {
       console.error(e);
-      alert("Failed to delete charity.");
+      showToast('error', 'Error', e?.response?.data?.message || "Failed to delete charity.");
     } finally {
       setDeletingId(null);
     }
@@ -180,11 +219,12 @@ export default function Charities() {
     setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, status: newStatus } : r)));
     try {
       await API.put(`/charities/${row.id}`, { ...row, status: newStatus });
+      showToast('success', 'Updated', `Charity ${newStatus.toLowerCase()}`);
     } catch (e) {
       console.error(e);
       // revert if failed
       setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, status: row.status } : r)));
-      alert("Failed to update publish status.");
+      showToast('error', 'Error', e?.response?.data?.message || "Failed to update publish status.");
     }
   };
 
@@ -200,56 +240,60 @@ export default function Charities() {
       });
       const uploadedUrl = data?.url || "";
       setEditing((ed) => ({ ...ed, cover: uploadedUrl }));
+      showToast('success', 'Success', 'Image uploaded successfully!');
     } catch (err) {
       console.error(err);
-      alert("Image upload failed.");
+      showToast('error', 'Error', 'Image upload failed.');
     } finally {
       setUploading(false);
     }
   };
 
   return (
-    <div className="charities concise">
+    <div className="charities-page">
       {/* Header */}
-      <div className="char-head">
-        <h2>Charities</h2>
+      <div className="char-header">
+        <div className="char-title-wrap">
+          <h2 className="char-title">Charities</h2>
+          <p className="char-subtitle">Manage all charity campaigns and their details</p>
+        </div>
         <div className="char-actions">
-          <div className="search">
+          <div className="char-search">
             <I><IconSearch /></I>
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Search title or location…"
+              className="char-search-input"
             />
           </div>
-          <select value={status} onChange={(e) => setStatus(e.target.value)}>
+          <select value={status} onChange={(e) => setStatus(e.target.value)} className="char-filter">
             <option value="all">All status</option>
             <option>Published</option>
             <option>Draft</option>
           </select>
-          <button className="btn" onClick={openNew}>
+          <button className="char-btn char-btn-primary" onClick={openNew}>
             <I><IconPlus /></I> New Charity
           </button>
         </div>
       </div>
 
-      {error && <div className="alert error">{error}</div>}
+      {error && <div className="char-alert char-alert-error">{error}</div>}
 
       {/* Table */}
-      <div className="table-wrap">
+      <div className="char-table-container">
         {loading ? (
-          <div className="empty">Loading charities…</div>
+          <div className="char-empty">Loading charities…</div>
         ) : (
-          <table className="tbl compact">
+          <table className="char-table">
             <thead>
               <tr>
-                <th>Cover</th> {/* Added Cover column */}
-                <th>Title</th>
+                <th>Charity</th>
                 <th>Category</th>
                 <th>Location</th>
                 <th>Progress</th>
                 <th>Status</th>
-                <th style={{ width: 220 }}>Actions</th>
+                <th className="char-actions-column">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -259,39 +303,41 @@ export default function Charities() {
                   Math.round((Number(r.raised || 0) / Number(r.goal || 1)) * 100)
                 );
                 return (
-                  <tr key={r.id}>
-                    <td className="cell-title with-thumb">
-                      {r.cover ? (
-                        <img className="cover-thumb" src={r.cover} alt="" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
-                      ) : (
-                        <div className="cover-thumb ph" aria-hidden="true" />
-                      )}
-                      <div className="title-stack">
-                        <strong>{r.title}</strong>
-                        <div className="muted small">{r.excerpt}</div>
+                  <tr key={r.id} className="char-table-row">
+                    <td className="char-cell-title">
+                      <div className="char-cell-with-thumb">
+                        {r.cover ? (
+                          <img className="char-cover-thumb" src={r.cover} alt="" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                        ) : (
+                          <div className="char-cover-thumb char-cover-placeholder" aria-hidden="true" />
+                        )}
+                        <div className="char-title-stack">
+                          <strong>{r.title}</strong>
+                          <div className="char-muted char-small">{r.excerpt}</div>
+                        </div>
                       </div>
                     </td>
-                    <td><span className="chip ghost">{r.category}</span></td>
-                    <td className="muted">{r.location}</td>
+                    <td><span className="char-chip char-chip-ghost">{r.category}</span></td>
+                    <td className="char-muted">{r.location}</td>
                     <td>
-                      <div className="mini-progress">
-                        <div className="bar"><span style={{ "--w": `${pct}%` }} /></div>
-                        <small className="muted">
+                      <div className="char-mini-progress">
+                        <div className="char-progress-bar"><span style={{ "--char-progress": `${pct}%` }} /></div>
+                        <small className="char-muted">
                           ${(r.raised || 0).toLocaleString()} / ${Number(r.goal || 0).toLocaleString()} • {pct}%
                         </small>
                       </div>
                     </td>
                     <td>
-                      <span className={`status st-${(r.status || "").toLowerCase()}`}>{r.status}</span>
+                      <span className={`char-status char-status-${(r.status || "").toLowerCase()}`}>{r.status}</span>
                     </td>
-                    <td className="row-actions">
-                      <button className="btn xs ghost" onClick={() => togglePub(r)}>
+                    <td className="char-row-actions">
+                      <button className="char-btn char-btn-xs char-btn-ghost" onClick={() => togglePub(r)}>
                         <I>{r.status === "Published" ? <IconUnpub /> : <IconPublish />}</I>
                         {r.status === "Published" ? "Unpublish" : "Publish"}
                       </button>
-                      <button className="btn xs ghost" onClick={() => openEdit(r)}><I><IconEdit /></I>Edit</button>
+                      <button className="char-btn char-btn-xs char-btn-ghost" onClick={() => openEdit(r)}><I><IconEdit /></I>Edit</button>
                       <button
-                        className="btn xs danger"
+                        className="char-btn char-btn-xs char-btn-danger"
                         disabled={deletingId === r.id}
                         onClick={() => remove(r.id)}
                       >
@@ -303,8 +349,8 @@ export default function Charities() {
               })}
               {filtered.length === 0 && !loading && (
                 <tr>
-                  <td colSpan="7">
-                    <div className="empty">No charities found.</div>
+                  <td colSpan="6">
+                    <div className="char-empty">No charities found.</div>
                   </td>
                 </tr>
               )}
@@ -315,19 +361,19 @@ export default function Charities() {
 
       {/* Editor Modal */}
       {editing && (
-        <div className="modal-overlay" onClick={() => setEditing(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
+        <div className="char-modal-overlay" onClick={() => setEditing(null)}>
+          <div className="char-modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="char-modal-header">
               <h3>{editing.id ? "Edit Charity" : "New Charity"}</h3>
-              <button className="close-btn" onClick={() => setEditing(null)}>
+              <button className="char-modal-close" onClick={() => setEditing(null)}>
                 &times;
               </button>
             </div>
 
-            <div className="modal-body">
-              <div className="edit-grid">
-                <div className="col form">
-                  <div className="field">
+            <div className="char-modal-body">
+              <div className="char-edit-grid">
+                <div className="char-form-column">
+                  <div className="char-field">
                     <label>Title</label>
                     <input
                       value={editing.title}
@@ -335,7 +381,7 @@ export default function Charities() {
                       placeholder="Charity title"
                     />
                   </div>
-                  <div className="field">
+                  <div className="char-field">
                     <label>Short Excerpt</label>
                     <input
                       value={editing.excerpt}
@@ -344,8 +390,8 @@ export default function Charities() {
                     />
                   </div>
 
-                  <div className="grid-3">
-                    <div className="field">
+                  <div className="char-grid-3">
+                    <div className="char-field">
                       <label>Category</label>
                       <select
                         value={editing.category}
@@ -356,14 +402,14 @@ export default function Charities() {
                         ))}
                       </select>
                     </div>
-                    <div className="field">
+                    <div className="char-field">
                       <label>Location</label>
                       <input
                         value={editing.location}
                         onChange={(e) => setEditing({ ...editing, location: e.target.value })}
                       />
                     </div>
-                    <div className="field">
+                    <div className="char-field">
                       <label>Status</label>
                       <select
                         value={editing.status}
@@ -375,8 +421,8 @@ export default function Charities() {
                     </div>
                   </div>
 
-                  <div className="grid-3">
-                    <div className="field">
+                  <div className="char-grid-3">
+                    <div className="char-field">
                       <label>Goal (USD)</label>
                       <input
                         type="number"
@@ -385,7 +431,7 @@ export default function Charities() {
                         onChange={(e) => setEditing({ ...editing, goal: Number(e.target.value || 0) })}
                       />
                     </div>
-                    <div className="field">
+                    <div className="char-field">
                       <label>Raised (USD)</label>
                       <input
                         type="number"
@@ -394,7 +440,7 @@ export default function Charities() {
                         onChange={(e) => setEditing({ ...editing, raised: Number(e.target.value || 0) })}
                       />
                     </div>
-                    <div className="field">
+                    <div className="char-field">
                       <label>Donation Link</label>
                       <input
                         placeholder="https://"
@@ -404,35 +450,35 @@ export default function Charities() {
                     </div>
                   </div>
 
-                  <div className="field">
+                  <div className="char-field">
                     <label>Cover Image</label>
                     <input
                       type="file"
                       accept="image/*"
                       onChange={handleImagePickAndUpload}
                     />
-                    <small className="muted">
+                    <small className="char-muted">
                       {uploading ? "Uploading…" : editing.cover ? "Image uploaded." : "Pick an image to upload."}
                     </small>
                     {editing.cover && (
-                      <div className="thumb">
+                      <div className="char-thumb-preview">
                         <img src={editing.cover} alt="cover preview" />
                       </div>
                     )}
                   </div>
                 </div>
 
-                <div className="col preview">
+                <div className="char-preview-column">
                   <PreviewCard data={editing} />
                 </div>
               </div>
             </div>
 
-            <div className="modal-footer">
-              <button className="btn btn-cancel" onClick={() => setEditing(null)}>
+            <div className="char-modal-footer">
+              <button className="char-btn char-btn-cancel" onClick={() => setEditing(null)}>
                 Cancel
               </button>
-              <button className="btn btn-save" disabled={saving} onClick={save}>
+              <button className="char-btn char-btn-save" disabled={saving} onClick={save}>
                 {saving ? "Saving…" : editing.id ? "Save Changes" : "Create Charity"}
               </button>
             </div>
@@ -446,33 +492,33 @@ export default function Charities() {
 function PreviewCard({ data }) {
   const pct = Math.min(100, Math.round((data.raised / data.goal) * 100));
   return (
-    <article className="pv-card">
-      <div className="pv-top">
-        <span className="pv-badge">{data.category || "Category"}</span>
-        <span className="pv-loc">{data.location || "Location"}</span>
+    <article className="char-preview-card">
+      <div className="char-preview-top">
+        <span className="char-preview-badge">{data.category || "Category"}</span>
+        <span className="char-preview-loc">{data.location || "Location"}</span>
       </div>
 
-      <div className="pv-title-row">
-        <span className="pv-icon" aria-hidden="true">
+      <div className="char-preview-title-row">
+        <span className="char-preview-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="3" ry="3"/></svg>
         </span>
-        <h3 className="pv-title">{data.title || "Untitled charity"}</h3>
+        <h3 className="char-preview-title">{data.title || "Untitled charity"}</h3>
       </div>
 
-      <p className="pv-excerpt">{data.excerpt || "Short description appears here."}</p>
+      <p className="char-preview-excerpt">{data.excerpt || "Short description appears here."}</p>
 
-      <div className="pv-progress">
-        <div className="bar"><span style={{ width: `${pct}%` }} /></div>
-        <div className="legend">
-          <span className="raised">${Number(data.raised || 0).toLocaleString()}</span>
-          <span className="goal">of ${Number(data.goal || 0).toLocaleString()}</span>
-          <span className="pct">{pct}%</span>
+      <div className="char-preview-progress">
+        <div className="char-preview-bar"><span style={{ width: `${pct}%` }} /></div>
+        <div className="char-preview-legend">
+          <span className="char-preview-raised">${Number(data.raised || 0).toLocaleString()}</span>
+          <span className="char-preview-goal">of ${Number(data.goal || 0).toLocaleString()}</span>
+          <span className="char-preview-pct">{pct}%</span>
         </div>
       </div>
 
-      <div className="pv-actions">
-        <button className="pv-btn primary">Donate</button>
-        <button className="pv-btn ghost">Details</button>
+      <div className="char-preview-actions">
+        <button className="char-preview-btn char-preview-btn-primary">Donate</button>
+        <button className="char-preview-btn char-preview-btn-ghost">Details</button>
       </div>
     </article>
   );

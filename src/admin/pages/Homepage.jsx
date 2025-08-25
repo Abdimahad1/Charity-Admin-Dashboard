@@ -1,14 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import "../../styles/Homepage.css";
 import axios from "axios";
+import Swal from "sweetalert2";
+//import the css
+import "../../styles/Homepage.css";
 
 /* ---------------------------------------
    API base detection (local vs deployed)
 ---------------------------------------- */
-const isLocalHost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
-const LOCAL_BASE = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api").replace(/\/$/, "");
-const DEPLOY_BASE = (import.meta.env.VITE_API_DEPLOY_URL || import.meta.env.VITE_API_DEPLOY || "https://charity-backend-c05j.onrender.com/api").replace(/\/$/, "");
-const API_BASE = import.meta.env.PROD ? DEPLOY_BASE : (isLocalHost ? LOCAL_BASE : DEPLOY_BASE);
+const API_BASE = window.location.hostname.includes("localhost") || window.location.hostname.includes("127.0.0.1")
+  ? (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api").replace(/\/$/, "")
+  : (import.meta.env.VITE_API_DEPLOY_URL || import.meta.env.VITE_API_DEPLOY || "https://charity-backend-c05j.onrender.com/api").replace(/\/$/, "");
 const API_ORIGIN = API_BASE.replace(/\/api(?:\/.*)?$/, "");
 
 /* ---------------------------------------
@@ -17,7 +18,7 @@ const API_ORIGIN = API_BASE.replace(/\/api(?:\/.*)?$/, "");
 const API = axios.create({
   baseURL: API_BASE,
   timeout: 20000,
-  withCredentials: false // we use Bearer token via header
+  withCredentials: false
 });
 
 API.interceptors.request.use((cfg) => {
@@ -29,7 +30,6 @@ API.interceptors.request.use((cfg) => {
 API.interceptors.response.use(
   (r) => r,
   (error) => {
-    // Helpful logging for 502 / network errors
     if (error?.response) {
       console.error(`[API ${error.response.status}]`, error.config?.url, error.response?.data || error.message);
     } else {
@@ -40,28 +40,22 @@ API.interceptors.response.use(
 );
 
 /* ---------------------------------------
-   URL helpers (match your site Home page)
+   URL helpers
 ---------------------------------------- */
 const absolutizeUploadUrl = (u) => {
   if (!u) return "";
   let s = String(u).trim().replace(/\\/g, "/");
   if (/^https?:\/\//i.test(s) || /^data:|^blob:/i.test(s)) return s;
   if (!s.startsWith("/")) s = `/${s}`;
-  // remove any accidental leading /api before /uploads
   s = s.replace(/^\/api(?=\/uploads\/)/i, "");
-  // map plain /images/foo.webp → /uploads/images/foo.webp
   if (/^\/images\//i.test(s)) s = `/uploads${s}`;
   if (/^\/[^/]+\.(jpg|jpeg|png|gif|webp|avif)$/i.test(s)) s = `/uploads/images${s}`;
   if (/^\/uploads\//i.test(s)) return `${API_ORIGIN}${s}`;
   return `${API_ORIGIN}${s}`;
 };
 
-// Ask backend variant endpoint for width-optimized assets.
-// Accepts any base (absolute or /uploads/…), strips query, adds ?width=
 const responsiveUrl = (url, width, format = "webp") => {
   if (!url) return "";
-  // if url already points to /api/upload/variant/:filename we keep it
-  // otherwise, convert absolute "/uploads/images/xxx.webp" to "/api/upload/variant/xxx.webp"
   const abs = absolutizeUploadUrl(url);
   const m = abs.match(/\/uploads\/images\/([^/?#]+)/i);
   const baseVariant = m ? `${API_BASE}/upload/variant/${m[1]}` : abs.split("?")[0];
@@ -99,7 +93,25 @@ const pickEventCover = (e) => {
   return absolutizeUploadUrl(candidate);
 };
 
-/* ---------- Tiny inline icons ---------- */
+/* ---------- Toast notifications ---------- */
+const showToast = (icon, title, message = "") => {
+  Swal.fire({
+    icon,
+    title,
+    text: message,
+    toast: true,
+    position: 'top-end',
+    showConfirmButton: false,
+    timer: 3000,
+    timerProgressBar: true,
+    didOpen: (toast) => {
+      toast.addEventListener('mouseenter', Swal.stopTimer);
+      toast.addEventListener('mouseleave', Swal.resumeTimer);
+    }
+  });
+};
+
+/* ---------- Icons ---------- */
 const I = ({ children }) => <span className="hm-ib">{children}</span>;
 const IconImage = () => (<svg viewBox="0 0 24 24"><path d="M21 5H3a2 2 0 00-2 2v10a2 2 0 002 2h18a2 2 0 002-2V7a2 2 0 00-2-2zM4 8a2 2 0 114 0 2 2 0 01-4 0zm0 9l5-6 4 4 3-3 4 5H4z"/></svg>);
 const IconText = () => (<svg viewBox="0 0 24 24"><path d="M4 5h16v2H13v12h-2V7H4z"/></svg>);
@@ -112,7 +124,6 @@ const IconAlign = () => (<svg viewBox="0 0 24 24"><path d="M3 7h18v2H3V7zm4 4h10
 const IconEdit = () => (<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zm18.71-11.04a1.003 1.003 0 0 0 0-1.42l-2.5-2.5a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.99-1.66z"/></svg>);
 const IconChevronLeft = () => (<svg viewBox="0 0 24 24"><path d="M15.41 16.59L10.83 12l4.58-4.59L14 6l-6 6 6 6z"/></svg>);
 const IconChevronRight = () => (<svg viewBox="0 0 24 24"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z"/></svg>);
-
 const IconEvent = () => (<svg viewBox="0 0 24 24"><path d="M19 4h-1V2h-2v2H8V2H6v2H5a3 3 0 00-3 3v11a3 3 0 003 3h14a3 3 0 003-3V7a3 3 0 00-3-3zm1 14a1 1 0 01-1 1H5a1 1 0 01-1-1V10h16v8zM4 8V7a1 1 0 011-1h14a1 1 0 011 1v1H4z"/></svg>);
 const IconCalendar = () => (<svg viewBox="0 0 24 24"><path d="M7 2h2v3H7V2zm8 0h2v3h-2V2zM4 7h16v13a2 2 0 01-2 2H6a2 2 0 01-2-2V7zm3 4h2v2H7v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2z"/></svg>);
 const IconTag = () => (<svg viewBox="0 0 24 24"><path d="M10 3H3v7l8 8 7-7-8-8zm-6 2h4v4H4V5z"/></svg>);
@@ -161,6 +172,7 @@ export default function HomepageAdmin() {
       } catch (e) {
         setError("Failed to load homepage slides.");
         console.error(e);
+        showToast('error', 'Error', 'Failed to load homepage slides.');
       } finally {
         if (mounted) setLoading(false);
       }
@@ -224,14 +236,20 @@ export default function HomepageAdmin() {
 
   async function addSlide(e) {
     e.preventDefault();
-    if (!form.file) return alert("Please pick an image.");
-    if (!form.title.trim()) return alert("Headline is required.");
+    if (!form.file) {
+      showToast('warning', 'Image Required', 'Please pick an image.');
+      return;
+    }
+    if (!form.title.trim()) {
+      showToast('warning', 'Headline Required', 'Headline is required.');
+      return;
+    }
 
     try {
       setSaving(true);
       const fd = new FormData();
       fd.append("file", form.file);
-      const up = await API.post("/upload/image", fd); // Axios sets boundary header automatically
+      const up = await API.post("/upload/image", fd);
       const url = up.data?.url ? absolutizeUploadUrl(up.data.url) : "";
 
       const payload = {
@@ -251,9 +269,10 @@ export default function HomepageAdmin() {
       setEditingId(normalized._id || normalized.id || "");
       setForm((s) => ({ ...s, file: null, preview: "" }));
       if (fileRef.current) fileRef.current.value = "";
+      showToast('success', 'Success', 'Slide created successfully!');
     } catch (err) {
       console.error(err);
-      alert(err?.response?.data?.message || "Failed to create slide.");
+      showToast('error', 'Error', err?.response?.data?.message || "Failed to create slide.");
     } finally {
       setSaving(false);
     }
@@ -292,17 +311,28 @@ export default function HomepageAdmin() {
       if (idx >= 0) setCurrentIdx(idx);
       setForm((s) => ({ ...s, file: null, preview: "" }));
       if (fileRef.current) fileRef.current.value = "";
-      alert("Slide updated.");
+      showToast('success', 'Success', 'Slide updated successfully!');
     } catch (err) {
       console.error(err);
-      alert(err?.response?.data?.message || "Failed to update slide.");
+      showToast('error', 'Error', err?.response?.data?.message || "Failed to update slide.");
     } finally {
       setSaving(false);
     }
   }
 
   async function removeSlide(id) {
-    if (!confirm("Delete this slide?")) return;
+    const result = await Swal.fire({
+      title: 'Are you sure?',
+      text: "You won't be able to revert this!",
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#3085d6',
+      cancelButtonColor: '#d33',
+      confirmButtonText: 'Yes, delete it!'
+    });
+    
+    if (!result.isConfirmed) return;
+    
     try {
       await API.delete(`/slides/${id}`);
       setSlides((arr) => arr.filter((s) => (s._id || s.id) !== id));
@@ -312,9 +342,10 @@ export default function HomepageAdmin() {
       } else {
         setCurrentIdx((idx) => Math.max(0, Math.min(idx, slides.length - 2)));
       }
+      showToast('success', 'Deleted', 'Slide has been deleted.');
     } catch (e) {
       console.error(e);
-      alert(e?.response?.data?.message || "Failed to delete slide.");
+      showToast('error', 'Error', e?.response?.data?.message || "Failed to delete slide.");
     }
   }
 
@@ -328,9 +359,10 @@ export default function HomepageAdmin() {
       if ((slide._id || slide.id) === editingId) {
         setForm((f) => ({ ...f, published: updated.published }));
       }
+      showToast('success', 'Updated', `Slide ${updated.published ? 'published' : 'unpublished'}`);
     } catch (e) {
       console.error(e);
-      alert(e?.response?.data?.message || "Failed to update publish state.");
+      showToast('error', 'Error', e?.response?.data?.message || "Failed to update publish state.");
     }
   }
 
@@ -343,9 +375,10 @@ export default function HomepageAdmin() {
       setSlides(normalized);
       const tgtIndex = normalized.findIndex((s) => (s._id || s.id) === id);
       if (tgtIndex >= 0) setCurrentIdx(tgtIndex);
+      showToast('success', 'Moved', `Slide moved ${dir}`);
     } catch (e) {
       console.error(e);
-      alert(e?.response?.data?.message || "Failed to reorder slide.");
+      showToast('error', 'Error', e?.response?.data?.message || "Failed to reorder slide.");
     } finally {
       setMovingId("");
     }
@@ -375,7 +408,7 @@ export default function HomepageAdmin() {
     let mounted = true;
     (async () => {
       try {
-        const { data } = await API.get("/events"); // admin list
+        const { data } = await API.get("/events");
         const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
         const normalized = items.map((e) => ({
           ...e,
@@ -384,6 +417,7 @@ export default function HomepageAdmin() {
         if (mounted) setEvents(normalized);
       } catch (e) {
         console.error(e);
+        showToast('error', 'Error', 'Failed to load events.');
       } finally {
         if (mounted) setEvLoading(false);
       }
@@ -405,13 +439,13 @@ export default function HomepageAdmin() {
   const evReset = () => {
     setEvForm({
       title: "",
-      category: "",
-      date: "",
-      location: "",
-      description: "",
-      published: true,
-      file: null,
-      preview: ""
+    category: "",
+    date: "",
+    location: "",
+    description: "",
+    published: true,
+    file: null,
+    preview: ""
     });
     setEvEditingId("");
     if (evFileRef.current) evFileRef.current.value = "";
@@ -436,8 +470,14 @@ export default function HomepageAdmin() {
 
   async function addEvent(e) {
     e.preventDefault();
-    if (!evForm.file) return alert("Please choose an event image.");
-    if (!evForm.title.trim()) return alert("Title is required.");
+    if (!evForm.file) {
+      showToast('warning', 'Image Required', 'Please choose an event image.');
+      return;
+    }
+    if (!evForm.title.trim()) {
+      showToast('warning', 'Title Required', 'Title is required.');
+      return;
+    }
     try {
       setEvSaving(true);
       const fd = new FormData();
@@ -458,10 +498,10 @@ export default function HomepageAdmin() {
       const normalized = { ...data, coverImage: pickEventCover({ ...data }) };
       setEvents((arr) => [normalized, ...arr]);
       evReset();
-      alert("Event created.");
+      showToast('success', 'Success', 'Event created successfully!');
     } catch (err) {
       console.error(err);
-      alert(err?.response?.data?.message || "Failed to create event.");
+      showToast('error', 'Error', err?.response?.data?.message || "Failed to create event.");
     } finally {
       setEvSaving(false);
     }
@@ -492,24 +532,36 @@ export default function HomepageAdmin() {
       const normalized = { ...data, coverImage: pickEventCover({ ...data }) };
       setEvents((arr) => arr.map((x) => ((x._id || x.id) === evEditingId ? { ...x, ...normalized } : x)));
       evReset();
-      alert("Event updated.");
+      showToast('success', 'Success', 'Event updated successfully!');
     } catch (err) {
       console.error(err);
-      alert(err?.response?.data?.message || "Failed to update event.");
+      showToast('error', 'Error', err?.response?.data?.message || "Failed to update event.");
     } finally {
       setEvSaving(false);
     }
   }
 
   async function deleteEvent(id) {
-    if (!confirm("Delete this event?")) return;
+    const result = await Swal.fire({
+      title: 'Are you sure?',
+      text: "You won't be able to revert this!",
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#3085d6',
+      cancelButtonColor: '#d33',
+      confirmButtonText: 'Yes, delete it!'
+    });
+    
+    if (!result.isConfirmed) return;
+    
     try {
       await API.delete(`/events/${id}`);
       setEvents((arr) => arr.filter((x) => (x._id || x.id) !== id));
       if (evEditingId === id) evReset();
+      showToast('success', 'Deleted', 'Event has been deleted.');
     } catch (e) {
       console.error(e);
-      alert(e?.response?.data?.message || "Failed to delete event.");
+      showToast('error', 'Error', e?.response?.data?.message || "Failed to delete event.");
     }
   }
 
@@ -521,9 +573,10 @@ export default function HomepageAdmin() {
       setEvents((arr) => arr.map((x) => ((x._id || x.id) === id ? updated : x)));
       await API.put(`/events/${id}`, { published: updated.published });
       if (evEditingId === id) setEvForm((f) => ({ ...f, published: updated.published }));
+      showToast('success', 'Updated', `Event ${updated.published ? 'published' : 'unpublished'}`);
     } catch (e) {
       console.error(e);
-      alert(e?.response?.data?.message || "Failed to update publish state.");
+      showToast('error', 'Error', e?.response?.data?.message || "Failed to update publish state.");
     }
   }
 
@@ -773,7 +826,7 @@ export default function HomepageAdmin() {
       <div className="he-header">
         <div className="he-titlewrap">
           <h3 className="he-title"><I><IconEvent /></I> Events Manager</h3>
-          <p className="he-sub">Post recent events shown on the homepage “Recent Events” section.</p>
+          <p className="he-sub">Post recent events shown on the homepage "Recent Events" section.</p>
         </div>
         <div className="he-kpis">
           <div className="hm-kpi">
