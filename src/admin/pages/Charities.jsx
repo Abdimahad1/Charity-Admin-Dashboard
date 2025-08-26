@@ -27,7 +27,10 @@ const isLocalHost = ["localhost", "127.0.0.1", ""].includes(window.location.host
 const BASE = isLocalHost ? LOCAL_BASE : DEPLOY_BASE;
 
 // Create axios instance with base URL
-const API = axios.create({ baseURL: BASE });
+const API = axios.create({ 
+  baseURL: BASE,
+  timeout: 15000, // Increased timeout
+});
 
 // Attach token from sessionStorage
 API.interceptors.request.use((cfg) => {
@@ -35,6 +38,43 @@ API.interceptors.request.use((cfg) => {
   if (t) cfg.headers.Authorization = `Bearer ${t}`;
   return cfg;
 });
+
+// Add response interceptor for better error handling
+API.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    console.error('API Error:', error);
+    if (error.code === 'ECONNABORTED') {
+      Swal.fire({
+        icon: 'error',
+        title: 'Timeout',
+        text: 'Request took too long. Please try again.',
+        toast: true,
+        position: 'top-end',
+        timer: 3000
+      });
+    } else if (error.response?.status === 502) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Server Error',
+        text: 'Backend server is temporarily unavailable.',
+        toast: true,
+        position: 'top-end',
+        timer: 3000
+      });
+    } else if (!error.response) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Network Error',
+        text: 'Cannot connect to the server. Please check your connection.',
+        toast: true,
+        position: 'top-end',
+        timer: 3000
+      });
+    }
+    return Promise.reject(error);
+  }
+);
 
 /* helpers */
 const normalizeOne = (r) => {
@@ -46,6 +86,14 @@ const normalizeMany = (data) => {
   // support either [] or {items: []}
   const arr = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
   return arr.map(normalizeOne);
+};
+
+// Helper to format image URLs
+const formatImageUrl = (url) => {
+  if (!url) return '';
+  if (url.startsWith('http')) return url;
+  if (url.startsWith('/uploads')) return `${BASE.replace('/api', '')}${url}`;
+  return `${BASE.replace('/api', '')}/uploads/${url}`;
 };
 
 // Toast notifications
@@ -123,7 +171,7 @@ export default function Charities() {
     const t = setTimeout(() => {
       setPage(1);
       fetchRows({ q, status, page: 1, limit });
-    }, 300);
+    }, 500); // Increased debounce time
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
@@ -307,7 +355,15 @@ export default function Charities() {
                     <td className="char-cell-title">
                       <div className="char-cell-with-thumb">
                         {r.cover ? (
-                          <img className="char-cover-thumb" src={r.cover} alt="" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                          <img 
+                            className="char-cover-thumb" 
+                            src={formatImageUrl(r.cover)} 
+                            alt="" 
+                            onError={(e) => { 
+                              e.currentTarget.style.display = 'none';
+                              e.currentTarget.nextElementSibling.style.display = 'block';
+                            }} 
+                          />
                         ) : (
                           <div className="char-cover-thumb char-cover-placeholder" aria-hidden="true" />
                         )}
@@ -462,7 +518,14 @@ export default function Charities() {
                     </small>
                     {editing.cover && (
                       <div className="char-thumb-preview">
-                        <img src={editing.cover} alt="cover preview" />
+                        <img 
+                          src={formatImageUrl(editing.cover)} 
+                          alt="cover preview" 
+                          onError={(e) => {
+                            e.target.style.display = 'none';
+                            e.target.parentElement.innerHTML = '<div>Image failed to load</div>';
+                          }}
+                        />
                       </div>
                     )}
                   </div>
