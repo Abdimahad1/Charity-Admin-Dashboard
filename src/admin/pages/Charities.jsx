@@ -48,6 +48,23 @@ const normalizeMany = (data) => {
   return arr.map(normalizeOne);
 };
 
+/* ---------------------------------------
+   URL helpers - IMPORTED FROM HOMEPAGE
+---------------------------------------- */
+const API_ORIGIN = BASE.replace(/\/api(?:\/.*)?$/, "");
+
+const absolutizeUploadUrl = (u) => {
+  if (!u) return "";
+  let s = String(u).trim().replace(/\\/g, "/");
+  if (/^https?:\/\//i.test(s) || /^data:|^blob:/i.test(s)) return s;
+  if (!s.startsWith("/")) s = `/${s}`;
+  s = s.replace(/^\/api(?=\/uploads\/)/i, "");
+  if (/^\/images\//i.test(s)) s = `/uploads${s}`;
+  if (/^\/[^/]+\.(jpg|jpeg|png|gif|webp|avif)$/i.test(s)) s = `/uploads/images${s}`;
+  if (/^\/uploads\//i.test(s)) return `${API_ORIGIN}${s}`;
+  return `${API_ORIGIN}${s}`;
+};
+
 // Toast notifications
 const showToast = (icon, title, message = "") => {
   Swal.fire({
@@ -90,7 +107,14 @@ export default function Charities() {
       const { data } = await API.get("/charities/admin/list", {
         params: { q, status, page, limit },
       });
-      setRows(normalizeMany(data));
+      
+      // Normalize the data and ensure cover images have absolute URLs
+      const normalizedData = normalizeMany(data).map(item => ({
+        ...item,
+        cover: item.cover ? absolutizeUploadUrl(item.cover) : ""
+      }));
+      
+      setRows(normalizedData);
       // supports { items, total } or []
       if (Array.isArray(data?.items)) {
         setTotal(Number(data.total || 0));
@@ -170,11 +194,15 @@ export default function Charities() {
       if (editing.id) {
         const { data } = await API.put(`/charities/${editing.id}`, editing);
         const updated = normalizeOne(data);
+        // Ensure cover URL is absolute
+        updated.cover = updated.cover ? absolutizeUploadUrl(updated.cover) : "";
         setRows((rs) => rs.map((r) => (r.id === editing.id ? updated : r)));
         showToast('success', 'Success', 'Charity updated successfully!');
       } else {
         const { data } = await API.post("/charities", editing);
         const created = normalizeOne(data);
+        // Ensure cover URL is absolute
+        created.cover = created.cover ? absolutizeUploadUrl(created.cover) : "";
         setRows((rs) => [created, ...rs]);
         showToast('success', 'Success', 'Charity created successfully!');
       }
@@ -235,10 +263,14 @@ export default function Charities() {
       setUploading(true);
       const fd = new FormData();
       fd.append("file", file);
-      const { data } = await API.post("/upload", fd, {
+      
+      // Use the same upload endpoint as your homepage
+      const { data } = await API.post("/upload/image", fd, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      const uploadedUrl = data?.url || "";
+      
+      // Get the absolute URL for the uploaded image
+      const uploadedUrl = data?.url ? absolutizeUploadUrl(data.url) : "";
       setEditing((ed) => ({ ...ed, cover: uploadedUrl }));
       showToast('success', 'Success', 'Image uploaded successfully!');
     } catch (err) {
