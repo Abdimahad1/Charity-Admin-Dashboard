@@ -1030,3 +1030,57 @@ input[type="range"]::-moz-range-thumb {
     font-size: 1rem;
   }
 }
+
+/* === IMAGE FIT FIXES (Homepage Admin) =========================== */
+/* Slides list thumb */
+.hm-thumb {
+  position: relative;
+  overflow: hidden;           /* keep corners and prevent spill */
+}
+.hm-thumb picture,
+.hm-thumb img {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;     /* beat the global img rule */
+  height: 100% !important;
+  display: block;
+  object-fit: cover;          /* <-- key */
+  object-position: center;
+  border-radius: inherit;
+}
+
+/* Events preview card cover */
+.he-cover {
+  position: relative;         /* allow absolute children */
+  overflow: hidden;
+}
+.he-cover picture,
+.he-cover-img {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  object-fit: cover;
+  object-position: center;
+}
+
+/* Events list thumb */
+.he-thumb {
+  position: relative;
+  overflow: hidden;
+}
+.he-thumb picture,
+.he-thumb-img {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  object-fit: cover;
+  object-position: center;
+}
+
+/* Optional: consistent ratios if you prefer aspect-ratio over fixed heights */
+/* .he-cover { aspect-ratio: 16 / 9; height: auto; } */
+/* .he-thumb { aspect-ratio: 5 / 3; height: auto; } */
