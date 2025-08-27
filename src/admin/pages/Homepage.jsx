@@ -1,15 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import Swal from "sweetalert2";
-//import the css
 import "../../styles/Homepage.css";
 
 /* ---------------------------------------
    API base detection (local vs deployed)
 ---------------------------------------- */
-const API_BASE = window.location.hostname.includes("localhost") || window.location.hostname.includes("127.0.0.1")
-  ? (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api").replace(/\/$/, "")
-  : (import.meta.env.VITE_API_DEPLOY_URL || import.meta.env.VITE_API_DEPLOY || "https://charity-backend-c05j.onrender.com/api").replace(/\/$/, "");
+const API_BASE =
+  (window.location.hostname.includes("localhost") || window.location.hostname.includes("127.0.0.1"))
+    ? (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api").replace(/\/$/, "")
+    : (import.meta.env.VITE_API_DEPLOY_URL || import.meta.env.VITE_API_DEPLOY || "https://charity-backend-c05j.onrender.com/api").replace(/\/$/, "");
 const API_ORIGIN = API_BASE.replace(/\/api(?:\/.*)?$/, "");
 
 /* ---------------------------------------
@@ -40,30 +40,38 @@ API.interceptors.response.use(
 );
 
 /* ---------------------------------------
-   URL helpers
+   URL helpers (variant-aware + fallbacks)
 ---------------------------------------- */
+const isBlobLike = (u = "") => /^blob:|^data:/i.test(String(u));
+
 const absolutizeUploadUrl = (u) => {
   if (!u) return "";
   let s = String(u).trim().replace(/\\/g, "/");
-  if (/^https?:\/\//i.test(s) || /^data:|^blob:/i.test(s)) return s;
+  if (/^https?:\/\//i.test(s) || isBlobLike(s)) return s;
   if (!s.startsWith("/")) s = `/${s}`;
-  s = s.replace(/^\/api(?=\/uploads\/)/i, "");
-  if (/^\/images\//i.test(s)) s = `/uploads${s}`;
+  s = s.replace(/^\/api(?=\/uploads\/)/i, "");          // normalize accidental /api prefix
+  if (/^\/images\//i.test(s)) s = `/uploads${s}`;       // /images/... -> /uploads/images/...
   if (/^\/[^/]+\.(jpg|jpeg|png|gif|webp|avif)$/i.test(s)) s = `/uploads/images${s}`;
   if (/^\/uploads\//i.test(s)) return `${API_ORIGIN}${s}`;
   return `${API_ORIGIN}${s}`;
 };
 
+const toVariantUrl = (absUrl) => {
+  // Turn .../uploads/images/<file> -> .../api/upload/variant/<file>
+  const m = absUrl.match(/\/uploads\/images\/([^/?#]+)/i);
+  return m ? `${API_BASE}/upload/variant/${m[1]}` : absUrl.split("?")[0];
+};
+
 const responsiveUrl = (url, width, format = "webp") => {
-  if (!url) return "";
+  if (!url || isBlobLike(url)) return url || "";
   const abs = absolutizeUploadUrl(url);
-  const m = abs.match(/\/uploads\/images\/([^/?#]+)/i);
-  const baseVariant = m ? `${API_BASE}/upload/variant/${m[1]}` : abs.split("?")[0];
-  return `${baseVariant}?width=${width}&format=${format}`;
+  const variant = toVariantUrl(abs);
+  // your backend returns optimized images (e.g., webp) at this route
+  return `${variant}?width=${width}&format=${format}`;
 };
 
 const buildSrcSet = (url) => {
-  if (!url) return "";
+  if (!url || isBlobLike(url)) return "";
   const widths = [320, 480, 640, 768, 1024, 1280, 1536, 1920];
   return widths.map((w) => `${responsiveUrl(url, w)} ${w}w`).join(", ");
 };
@@ -330,9 +338,9 @@ export default function HomepageAdmin() {
       cancelButtonColor: '#d33',
       confirmButtonText: 'Yes, delete it!'
     });
-    
+
     if (!result.isConfirmed) return;
-    
+
     try {
       await API.delete(`/slides/${id}`);
       setSlides((arr) => arr.filter((s) => (s._id || s.id) !== id));
@@ -439,13 +447,13 @@ export default function HomepageAdmin() {
   const evReset = () => {
     setEvForm({
       title: "",
-    category: "",
-    date: "",
-    location: "",
-    description: "",
-    published: true,
-    file: null,
-    preview: ""
+      category: "",
+      date: "",
+      location: "",
+      description: "",
+      published: true,
+      file: null,
+      preview: ""
     });
     setEvEditingId("");
     if (evFileRef.current) evFileRef.current.value = "";
@@ -551,9 +559,9 @@ export default function HomepageAdmin() {
       cancelButtonColor: '#d33',
       confirmButtonText: 'Yes, delete it!'
     });
-    
+
     if (!result.isConfirmed) return;
-    
+
     try {
       await API.delete(`/events/${id}`);
       setEvents((arr) => arr.filter((x) => (x._id || x.id) !== id));
@@ -587,8 +595,6 @@ export default function HomepageAdmin() {
     const dt = new Date(d);
     return Number.isNaN(dt.getTime()) ? "" : dt.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
   };
-
-  const getEventCover = (e) => pickEventCover(e) || "";
 
   /* ================= RENDER ================ */
   const hasPreview = !!form.preview;
@@ -725,13 +731,41 @@ export default function HomepageAdmin() {
           <div
             className={`hm-hero ${form.align}`}
             style={{
-              backgroundImage: `url('${responsiveUrl(currentPreview, 1280)}')`,
+              backgroundImage: currentPreview ? `url('${responsiveUrl(currentPreview, 1280)}')` : undefined,
               "--hm-overlay": `${(Number(form.overlay) || 40) / 100}`
             }}
           >
-            <button type="button" className="hm-hero-arrow left" onClick={() => currentIdx > 0 && loadSlideIntoForm(currentIdx - 1)} disabled={slides.length === 0} title="Previous slide">
+            <button
+              type="button"
+              className="hm-hero-arrow left"
+              onClick={() => currentIdx > 0 && loadSlideIntoForm(currentIdx - 1)}
+              disabled={slides.length === 0}
+              title="Previous slide"
+            >
               <IconChevronLeft />
             </button>
+
+            {/* offscreen img to force-load preview & fallback to original if needed */}
+            {currentPreview ? (
+              <img
+                alt=""
+                aria-hidden="true"
+                className="hm-preloader"
+                loading="lazy"
+                decoding="async"
+                src={responsiveUrl(currentPreview, 1280)}
+                srcSet={buildSrcSet(currentPreview)}
+                sizes="(max-width: 1024px) 100vw, 1280px"
+                onError={(e) => {
+                  const orig = absolutizeUploadUrl(currentPreview).split("?")[0];
+                  if (orig && e.currentTarget.src !== orig) {
+                    e.currentTarget.src = orig;
+                    e.currentTarget.srcset = "";
+                  }
+                }}
+                style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
+              />
+            ) : null}
 
             <div className="hm-hero__tint" />
             <div className="hm-hero__text">
@@ -748,7 +782,13 @@ export default function HomepageAdmin() {
               </div>
             </div>
 
-            <button type="button" className="hm-hero-arrow right" onClick={() => currentIdx < slides.length - 1 && loadSlideIntoForm(currentIdx + 1)} disabled={slides.length === 0} title="Next slide">
+            <button
+              type="button"
+              className="hm-hero-arrow right"
+              onClick={() => currentIdx < slides.length - 1 && loadSlideIntoForm(currentIdx + 1)}
+              disabled={slides.length === 0}
+              title="Next slide"
+            >
               <IconChevronRight />
             </button>
           </div>
@@ -756,7 +796,12 @@ export default function HomepageAdmin() {
           <div className="hm-preview-foot">
             {selectedSlide ? (
               <>
-                <button type="button" className="hm-btn" onClick={() => loadSlideIntoForm(currentIdx)} title="Load this slide into the form for editing">
+                <button
+                  type="button"
+                  className="hm-btn"
+                  onClick={() => loadSlideIntoForm(currentIdx)}
+                  title="Load this slide into the form for editing"
+                >
                   <I><IconEdit /></I> Edit This Slide
                 </button>
                 {!editingId && slides.length > 1 ? (
@@ -785,17 +830,42 @@ export default function HomepageAdmin() {
           <ul className="hm-slides">
             {slides.map((s, idx) => {
               const id = s._id || s.id;
-              const thumb = responsiveUrl(s.src, 480);
+              const thumbSrc = responsiveUrl(s.src, 480);
               const thumbSet = buildSrcSet(s.src);
+              const sizes = "(max-width: 900px) 50vw, 480px";
               return (
                 <li key={id} className={`hm-slide ${idx === currentIdx ? "is-current" : ""}`}>
                   <button
                     className="hm-thumb"
-                    style={{ backgroundImage: `url('${thumb}')` }}
                     onClick={() => loadSlideIntoForm(idx)}
                     title="Click to load this slide into the form"
                     aria-label={`Edit ${s.title || "slide"}`}
-                  />
+                  >
+                    {/* Use real <img> so we get decoding/lazy/srcset + error fallback */}
+                    {s.src ? (
+                      <picture>
+                        <source srcSet={thumbSet} sizes={sizes} type="image/webp" />
+                        <img
+                          alt={s.alt || s.title || "Slide"}
+                          loading="lazy"
+                          decoding="async"
+                          src={thumbSrc}
+                          srcSet={thumbSet}
+                          sizes={sizes}
+                          onError={(e) => {
+                            const orig = absolutizeUploadUrl(s.src).split("?")[0];
+                            if (orig && e.currentTarget.src !== orig) {
+                              e.currentTarget.src = orig;
+                              e.currentTarget.srcset = "";
+                              return;
+                            }
+                            e.currentTarget.style.visibility = "hidden";
+                          }}
+                        />
+                      </picture>
+                    ) : null}
+                  </button>
+
                   <div className="hm-slide__meta">
                     <div className="hm-slide__title">{s.title || <span className="hm-muted">(untitled)</span>}</div>
                     <div className="hm-slide__row">
@@ -942,11 +1012,32 @@ export default function HomepageAdmin() {
           </div>
 
           <article className="he-card">
-            <div
-              className="he-cover"
-              style={evForm.preview ? { backgroundImage: `url(${evForm.preview})` } : undefined}
-              aria-hidden="true"
-            />
+            <div className="he-cover" aria-hidden="true">
+              {evForm.preview ? (
+                <picture>
+                  <source srcSet={buildSrcSet(evForm.preview)} type="image/webp" />
+                  <img
+                    className="he-cover-img"
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                    src={responsiveUrl(evForm.preview, 800)}
+                    srcSet={buildSrcSet(evForm.preview)}
+                    sizes="(max-width:1100px) 50vw, 33vw"
+                    onError={(e) => {
+                      const orig = absolutizeUploadUrl(evForm.preview).split("?")[0];
+                      if (orig && e.currentTarget.src !== orig) {
+                        e.currentTarget.src = orig;
+                        e.currentTarget.srcset = "";
+                        return;
+                      }
+                      e.currentTarget.style.visibility = "hidden";
+                    }}
+                  />
+                </picture>
+              ) : null}
+            </div>
+
             <div className="he-meta">
               <div className="he-top">
                 <span className="he-badge">{evForm.category || "Event"}</span>
@@ -975,13 +1066,39 @@ export default function HomepageAdmin() {
           <ul className="he-items">
             {events.map((e) => {
               const id = e._id || e.id;
-              const cover = getEventCover(e);
+              const cover = pickEventCover(e) || "";
               const coverSmall = cover ? responsiveUrl(cover, 600) : "";
               const coverSet = cover ? buildSrcSet(cover) : "";
+              const sizes = "(max-width:1100px) 50vw, 33vw";
 
               return (
                 <li key={id} className="he-item">
-                  <div className="he-thumb" style={coverSmall ? { backgroundImage: `url(${coverSmall})` } : undefined} />
+                  <div className="he-thumb">
+                    {cover ? (
+                      <picture>
+                        <source srcSet={coverSet} sizes={sizes} type="image/webp" />
+                        <img
+                          className="he-thumb-img"
+                          alt={e.title || "Event"}
+                          loading="lazy"
+                          decoding="async"
+                          src={coverSmall}
+                          srcSet={coverSet}
+                          sizes={sizes}
+                          onError={(ev) => {
+                            const orig = absolutizeUploadUrl(cover).split("?")[0];
+                            if (orig && ev.currentTarget.src !== orig) {
+                              ev.currentTarget.src = orig;
+                              ev.currentTarget.srcset = "";
+                              return;
+                            }
+                            ev.currentTarget.style.visibility = "hidden";
+                          }}
+                        />
+                      </picture>
+                    ) : null}
+                  </div>
+
                   <div className="he-info">
                     <div className="he-line">
                       <strong className="he-name">{e.title || "(untitled)"}</strong>
