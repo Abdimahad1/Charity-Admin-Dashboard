@@ -10,7 +10,6 @@ const API_BASE =
   (window.location.hostname.includes("localhost") || window.location.hostname.includes("127.0.0.1"))
     ? (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api").replace(/\/$/, "")
     : (import.meta.env.VITE_API_DEPLOY_URL || import.meta.env.VITE_API_DEPLOY || "https://charity-backend-c05j.onrender.com/api").replace(/\/$/, "");
-const API_ORIGIN = API_BASE.replace(/\/api(?:\/.*)?$/, "");
 
 /* ---------------------------------------
    Axios instance + interceptors
@@ -40,44 +39,35 @@ API.interceptors.response.use(
 );
 
 /* ---------------------------------------
-   URL helpers (variant-aware + fallbacks)
+   Simplified URL helpers (like charity page)
 ---------------------------------------- */
 const isBlobLike = (u = "") => /^blob:|^data:/i.test(String(u));
 
-const absolutizeUploadUrl = (u) => {
-  if (!u) return "";
-  let s = String(u).trim().replace(/\\/g, "/");
-  if (/^https?:\/\//i.test(s) || isBlobLike(s)) return s;
-  if (!s.startsWith("/")) s = `/${s}`;
-  s = s.replace(/^\/api(?=\/uploads\/)/i, "");          // normalize accidental /api prefix
-  if (/^\/images\//i.test(s)) s = `/uploads${s}`;       // /images/... -> /uploads/images/...
-  if (/^\/[^/]+\.(jpg|jpeg|png|gif|webp|avif)$/i.test(s)) s = `/uploads/images${s}`;
-  if (/^\/uploads\//i.test(s)) return `${API_ORIGIN}${s}`;
-  return `${API_ORIGIN}${s}`;
+// Simple URL formatter like in charity page
+const formatImageUrl = (url) => {
+  if (!url) return '';
+  if (url.startsWith('http') || isBlobLike(url)) return url;
+  if (url.startsWith('/uploads')) return `${API_BASE.replace('/api', '')}${url}`;
+  return `${API_BASE.replace('/api', '')}/uploads/${url}`;
 };
 
-const toVariantUrl = (absUrl) => {
-  // Turn .../uploads/images/<file> -> .../api/upload/variant/<file>
-  const m = absUrl.match(/\/uploads\/images\/([^/?#]+)/i);
-  return m ? `${API_BASE}/upload/variant/${m[1]}` : absUrl.split("?")[0];
-};
-
+// Simplified version for responsive images (optional)
 const responsiveUrl = (url, width, format = "webp") => {
   if (!url || isBlobLike(url)) return url || "";
-  const abs = absolutizeUploadUrl(url);
-  const variant = toVariantUrl(abs);
-  // your backend returns optimized images (e.g., webp) at this route
-  return `${variant}?width=${width}&format=${format}`;
+  const baseUrl = formatImageUrl(url);
+  return `${baseUrl}?width=${width}&format=${format}`;
 };
 
+// Simplified srcSet builder
 const buildSrcSet = (url) => {
   if (!url || isBlobLike(url)) return "";
   const widths = [320, 480, 640, 768, 1024, 1280, 1536, 1920];
   return widths.map((w) => `${responsiveUrl(url, w)} ${w}w`).join(", ");
 };
 
+// Simplified slide source picker
 const pickSlideSrc = (s) => {
-  if (s?.src) return absolutizeUploadUrl(s.src);
+  if (s?.src) return formatImageUrl(s.src);
   const img0 = Array.isArray(s?.images) ? s.images[0] : undefined;
   const img0Url = (img0 && typeof img0 === "object") ? (img0.url ?? img0.src ?? img0.path) : img0;
   const candidate =
@@ -86,11 +76,12 @@ const pickSlideSrc = (s) => {
     s?.file?.url ??
     img0Url ??
     (s?.filename ? `/uploads/images/${s.filename}` : "");
-  return absolutizeUploadUrl(candidate);
+  return formatImageUrl(candidate);
 };
 
+// Simplified event cover picker
 const pickEventCover = (e) => {
-  if (e?.coverImage) return absolutizeUploadUrl(e.coverImage);
+  if (e?.coverImage) return formatImageUrl(e.coverImage);
   const img0 = Array.isArray(e?.images) ? e.images[0] : undefined;
   const img0Url = (img0 && typeof img0 === "object") ? (img0.url ?? img0.src ?? img0.path) : img0;
   const candidate =
@@ -98,7 +89,7 @@ const pickEventCover = (e) => {
     e?.image ??
     img0Url ??
     (e?.filename ? `/uploads/images/${e.filename}` : "");
-  return absolutizeUploadUrl(candidate);
+  return formatImageUrl(candidate);
 };
 
 /* ---------- Toast notifications ---------- */
@@ -258,7 +249,7 @@ export default function HomepageAdmin() {
       const fd = new FormData();
       fd.append("file", form.file);
       const up = await API.post("/upload/image", fd);
-      const url = up.data?.url ? absolutizeUploadUrl(up.data.url) : "";
+      const url = up.data?.url ? formatImageUrl(up.data.url) : "";
 
       const payload = {
         title: form.title.trim(),
@@ -297,7 +288,7 @@ export default function HomepageAdmin() {
         const fd = new FormData();
         fd.append("file", form.file);
         const up = await API.post("/upload/image", fd);
-        newSrc = up.data?.url ? absolutizeUploadUrl(up.data.url) : undefined;
+        newSrc = up.data?.url ? formatImageUrl(up.data.url) : undefined;
       }
 
       const payload = {
@@ -491,7 +482,7 @@ export default function HomepageAdmin() {
       const fd = new FormData();
       fd.append("file", evForm.file);
       const up = await API.post("/upload/image", fd);
-      const cover = up.data?.url ? absolutizeUploadUrl(up.data.url) : "";
+      const cover = up.data?.url ? formatImageUrl(up.data.url) : "";
 
       const payload = {
         title: evForm.title.trim(),
@@ -525,7 +516,7 @@ export default function HomepageAdmin() {
         const fd = new FormData();
         fd.append("file", evForm.file);
         const up = await API.post("/upload/image", fd);
-        newCover = up.data?.url ? absolutizeUploadUrl(up.data.url) : undefined;
+        newCover = up.data?.url ? formatImageUrl(up.data.url) : undefined;
       }
       const payload = {
         title: evForm.title.trim(),
@@ -731,7 +722,7 @@ export default function HomepageAdmin() {
           <div
             className={`hm-hero ${form.align}`}
             style={{
-              backgroundImage: currentPreview ? `url('${responsiveUrl(currentPreview, 1280)}')` : undefined,
+              backgroundImage: currentPreview ? `url('${formatImageUrl(currentPreview)}')` : undefined,
               "--hm-overlay": `${(Number(form.overlay) || 40) / 100}`
             }}
           >
@@ -753,14 +744,14 @@ export default function HomepageAdmin() {
                 className="hm-preloader"
                 loading="lazy"
                 decoding="async"
-                src={responsiveUrl(currentPreview, 1280)}
-                srcSet={buildSrcSet(currentPreview)}
-                sizes="(max-width: 1024px) 100vw, 1280px"
+                src={formatImageUrl(currentPreview)}
                 onError={(e) => {
-                  const orig = absolutizeUploadUrl(currentPreview).split("?")[0];
-                  if (orig && e.currentTarget.src !== orig) {
-                    e.currentTarget.src = orig;
-                    e.currentTarget.srcset = "";
+                  // Try direct URL if the formatted one fails
+                  const directUrl = currentPreview.startsWith('/') 
+                    ? `${API_BASE.replace('/api', '')}${currentPreview}`
+                    : currentPreview;
+                  if (e.currentTarget.src !== directUrl) {
+                    e.currentTarget.src = directUrl;
                   }
                 }}
                 style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
@@ -830,9 +821,8 @@ export default function HomepageAdmin() {
           <ul className="hm-slides">
             {slides.map((s, idx) => {
               const id = s._id || s.id;
-              const thumbSrc = responsiveUrl(s.src, 480);
-              const thumbSet = buildSrcSet(s.src);
-              const sizes = "(max-width: 900px) 50vw, 480px";
+              const thumbSrc = formatImageUrl(s.src);
+              
               return (
                 <li key={id} className={`hm-slide ${idx === currentIdx ? "is-current" : ""}`}>
                   <button
@@ -841,28 +831,24 @@ export default function HomepageAdmin() {
                     title="Click to load this slide into the form"
                     aria-label={`Edit ${s.title || "slide"}`}
                   >
-                    {/* Use real <img> so we get decoding/lazy/srcset + error fallback */}
                     {s.src ? (
-                      <picture>
-                        <source srcSet={thumbSet} sizes={sizes} type="image/webp" />
-                        <img
-                          alt={s.alt || s.title || "Slide"}
-                          loading="lazy"
-                          decoding="async"
-                          src={thumbSrc}
-                          srcSet={thumbSet}
-                          sizes={sizes}
-                          onError={(e) => {
-                            const orig = absolutizeUploadUrl(s.src).split("?")[0];
-                            if (orig && e.currentTarget.src !== orig) {
-                              e.currentTarget.src = orig;
-                              e.currentTarget.srcset = "";
-                              return;
-                            }
-                            e.currentTarget.style.visibility = "hidden";
-                          }}
-                        />
-                      </picture>
+                      <img
+                        alt={s.alt || s.title || "Slide"}
+                        loading="lazy"
+                        decoding="async"
+                        src={thumbSrc}
+                        onError={(e) => {
+                          // Try direct URL if the formatted one fails
+                          const directUrl = s.src.startsWith('/') 
+                            ? `${API_BASE.replace('/api', '')}${s.src}`
+                            : s.src;
+                          if (e.currentTarget.src !== directUrl) {
+                            e.currentTarget.src = directUrl;
+                            return;
+                          }
+                          e.currentTarget.style.visibility = "hidden";
+                        }}
+                      />
                     ) : null}
                   </button>
 
@@ -1014,27 +1000,24 @@ export default function HomepageAdmin() {
           <article className="he-card">
             <div className="he-cover" aria-hidden="true">
               {evForm.preview ? (
-                <picture>
-                  <source srcSet={buildSrcSet(evForm.preview)} type="image/webp" />
-                  <img
-                    className="he-cover-img"
-                    alt=""
-                    loading="lazy"
-                    decoding="async"
-                    src={responsiveUrl(evForm.preview, 800)}
-                    srcSet={buildSrcSet(evForm.preview)}
-                    sizes="(max-width:1100px) 50vw, 33vw"
-                    onError={(e) => {
-                      const orig = absolutizeUploadUrl(evForm.preview).split("?")[0];
-                      if (orig && e.currentTarget.src !== orig) {
-                        e.currentTarget.src = orig;
-                        e.currentTarget.srcset = "";
-                        return;
-                      }
-                      e.currentTarget.style.visibility = "hidden";
-                    }}
-                  />
-                </picture>
+                <img
+                  className="he-cover-img"
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  src={formatImageUrl(evForm.preview)}
+                  onError={(e) => {
+                    // Try direct URL if the formatted one fails
+                    const directUrl = evForm.preview.startsWith('/') 
+                      ? `${API_BASE.replace('/api', '')}${evForm.preview}`
+                      : evForm.preview;
+                    if (e.currentTarget.src !== directUrl) {
+                      e.currentTarget.src = directUrl;
+                      return;
+                    }
+                    e.currentTarget.style.visibility = "hidden";
+                  }}
+                />
               ) : null}
             </div>
 
@@ -1067,35 +1050,29 @@ export default function HomepageAdmin() {
             {events.map((e) => {
               const id = e._id || e.id;
               const cover = pickEventCover(e) || "";
-              const coverSmall = cover ? responsiveUrl(cover, 600) : "";
-              const coverSet = cover ? buildSrcSet(cover) : "";
-              const sizes = "(max-width:1100px) 50vw, 33vw";
 
               return (
                 <li key={id} className="he-item">
                   <div className="he-thumb">
                     {cover ? (
-                      <picture>
-                        <source srcSet={coverSet} sizes={sizes} type="image/webp" />
-                        <img
-                          className="he-thumb-img"
-                          alt={e.title || "Event"}
-                          loading="lazy"
-                          decoding="async"
-                          src={coverSmall}
-                          srcSet={coverSet}
-                          sizes={sizes}
-                          onError={(ev) => {
-                            const orig = absolutizeUploadUrl(cover).split("?")[0];
-                            if (orig && ev.currentTarget.src !== orig) {
-                              ev.currentTarget.src = orig;
-                              ev.currentTarget.srcset = "";
-                              return;
-                            }
-                            ev.currentTarget.style.visibility = "hidden";
-                          }}
-                        />
-                      </picture>
+                      <img
+                        className="he-thumb-img"
+                        alt={e.title || "Event"}
+                        loading="lazy"
+                        decoding="async"
+                        src={formatImageUrl(cover)}
+                        onError={(ev) => {
+                          // Try direct URL if the formatted one fails
+                          const directUrl = cover.startsWith('/') 
+                            ? `${API_BASE.replace('/api', '')}${cover}`
+                            : cover;
+                          if (ev.currentTarget.src !== directUrl) {
+                            ev.currentTarget.src = directUrl;
+                            return;
+                          }
+                          ev.currentTarget.style.visibility = "hidden";
+                        }}
+                      />
                     ) : null}
                   </div>
 
