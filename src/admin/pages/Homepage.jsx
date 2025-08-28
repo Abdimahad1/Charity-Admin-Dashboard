@@ -91,9 +91,12 @@ const toUploadsPath = (v) => {
 
 /** Build variant endpoint for on-demand resized fallback (legacy; may 410 if disabled server-side) */
 const toVariantUrl = (srcPath, w = 640) => {
-  const fn = (srcPath || "").split("/").pop(); // filename.webp
+  const s = String(srcPath || "");
+  if (!s || s.startsWith("data:")) return "";  // don't try variant for base64
+  const fn = s.split("/").pop();
   return fn ? `${API_BASE}/upload/variant/${fn}?width=${w}` : "";
 };
+
 
 /* ---------- Toast notifications ---------- */
 const showToast = (icon, title, message = "") => {
@@ -257,43 +260,38 @@ export default function HomepageAdmin() {
 
   async function addSlide(e) {
     e.preventDefault();
-    if (!form.file) {
-      showToast("warning", "Image Required", "Please pick an image.");
-      return;
-    }
-    if (!form.title.trim()) {
-      showToast("warning", "Headline Required", "Headline is required.");
-      return;
-    }
-
+    if (!form.file) return showToast("warning", "Image Required", "Please pick an image.");
+    if (!form.title.trim()) return showToast("warning", "Headline Required", "Headline is required.");
+  
     try {
       setSaving(true);
       const fd = new FormData();
       fd.append("file", form.file);
-      const up = await API.post("/upload/image", fd);
-
-      // Accept data: URLs (new) or legacy /uploads paths
+  
+      // Use same endpoint as Charities -> returns data:image/...;base64,...
+      const up = await API.post("/upload", fd);
+  
       const uploaded = up.data?.url || up.data?.path || "";
       const srcValue = isDataUrl(uploaded) ? uploaded : toUploadsPath(uploaded);
-
+  
       const payload = {
         title: form.title.trim(),
         subtitle: form.subtitle.trim(),
         alt: form.alt.trim() || "Homepage slide",
-        src: srcValue, // store path OR data URL
+        src: srcValue,
         align: form.align,
         overlay: Number(form.overlay) || 40,
         published: !!form.published
       };
-
+  
       const { data } = await API.post("/slides", payload);
       const createdPath = toUploadsPath(data.src || data.path || srcValue);
       const normalized = { ...data, _srcPath: createdPath, srcUrl: formatImageUrl(createdPath) };
-
-      setSlides((arr) => [normalized, ...arr]);
+  
+      setSlides(arr => [normalized, ...arr]);
       setCurrentIdx(0);
       setEditingId(normalized._id || normalized.id || "");
-      setForm((s) => ({ ...s, file: null, preview: "" }));
+      setForm(s => ({ ...s, file: null, preview: "" }));
       if (fileRef.current) fileRef.current.value = "";
       showToast("success", "Success", "Slide created successfully!");
     } catch (err) {
@@ -305,22 +303,26 @@ export default function HomepageAdmin() {
       setSaving(false);
     }
   }
+  
 
   async function updateSlide(e) {
     e.preventDefault();
     if (!editingId) return;
-
+  
     try {
       setSaving(true);
       let newSrcValue;
       if (form.file) {
         const fd = new FormData();
         fd.append("file", form.file);
-        const up = await API.post("/upload/image", fd);
+  
+        // Use /upload so we can store data:image base64
+        const up = await API.post("/upload", fd);
+  
         const uploaded = up.data?.url || up.data?.path || "";
         newSrcValue = isDataUrl(uploaded) ? uploaded : toUploadsPath(uploaded);
       }
-
+  
       const payload = {
         title: form.title.trim(),
         subtitle: form.subtitle.trim(),
@@ -330,19 +332,16 @@ export default function HomepageAdmin() {
         published: !!form.published,
         ...(newSrcValue ? { src: newSrcValue } : {})
       };
-
+  
       const { data } = await API.put(`/slides/${editingId}`, payload);
       const p = toUploadsPath(data.src || newSrcValue || "");
       const normalized = { ...data, _srcPath: p, srcUrl: formatImageUrl(p) };
-
-      setSlides((arr) =>
-        arr.map((s) => ((s._id || s.id) === editingId ? { ...s, ...normalized } : s))
-      );
-
-      const idx = slides.findIndex((s) => (s._id || s.id) === editingId);
+  
+      setSlides(arr => arr.map(s => ((s._id || s.id) === editingId ? { ...s, ...normalized } : s)));
+      const idx = slides.findIndex(s => (s._id || s.id) === editingId);
       if (idx >= 0) setCurrentIdx(idx);
-
-      setForm((s) => ({ ...s, file: null, preview: "" }));
+  
+      setForm(s => ({ ...s, file: null, preview: "" }));
       if (fileRef.current) fileRef.current.value = "";
       showToast("success", "Success", "Slide updated successfully!");
     } catch (err) {
@@ -354,6 +353,7 @@ export default function HomepageAdmin() {
       setSaving(false);
     }
   }
+  
 
   async function removeSlide(id) {
     const result = await Swal.fire({
@@ -526,36 +526,35 @@ export default function HomepageAdmin() {
 
   async function addEvent(e) {
     e.preventDefault();
-    if (!evForm.file) {
-      showToast("warning", "Image Required", "Please choose an event image.");
-      return;
-    }
-    if (!evForm.title.trim()) {
-      showToast("warning", "Title Required", "Title is required.");
-      return;
-    }
+    if (!evForm.file) return showToast("warning", "Image Required", "Please choose an event image.");
+    if (!evForm.title.trim()) return showToast("warning", "Title Required", "Title is required.");
+  
     try {
       setEvSaving(true);
       const fd = new FormData();
       fd.append("file", evForm.file);
-      const up = await API.post("/upload/image", fd);
-
+  
+      // Use /upload so events also store data:image base64 (like charities)
+      const up = await API.post("/upload", fd);
+  
       const uploaded = up.data?.url || up.data?.path || "";
       const coverValue = isDataUrl(uploaded) ? uploaded : toUploadsPath(uploaded);
-
+  
       const payload = {
         title: evForm.title.trim(),
         category: evForm.category.trim(),
         date: evForm.date ? new Date(evForm.date).toISOString() : undefined,
         location: evForm.location.trim(),
         description: evForm.description.trim(),
-        coverImage: coverValue, // store path OR data URL
+        coverImage: coverValue,
         published: !!evForm.published
       };
+  
       const { data } = await API.post("/events", payload);
       const p = toUploadsPath(data.coverImage || coverValue);
       const normalized = { ...data, _srcPath: p, coverUrl: formatImageUrl(p) };
-      setEvents((arr) => [normalized, ...arr]);
+  
+      setEvents(arr => [normalized, ...arr]);
       evReset();
       showToast("success", "Success", "Event created successfully!");
     } catch (err) {
@@ -567,20 +566,26 @@ export default function HomepageAdmin() {
       setEvSaving(false);
     }
   }
+  
 
   async function updateEvent(e) {
     e.preventDefault();
     if (!evEditingId) return;
+  
     try {
       setEvSaving(true);
       let newCoverValue;
       if (evForm.file) {
         const fd = new FormData();
         fd.append("file", evForm.file);
-        const up = await API.post("/upload/image", fd);
+  
+        // Use /upload so replacement image is saved as data:image base64
+        const up = await API.post("/upload", fd);
+  
         const uploaded = up.data?.url || up.data?.path || "";
         newCoverValue = isDataUrl(uploaded) ? uploaded : toUploadsPath(uploaded);
       }
+  
       const payload = {
         title: evForm.title.trim(),
         category: evForm.category.trim(),
@@ -590,10 +595,12 @@ export default function HomepageAdmin() {
         published: !!evForm.published,
         ...(newCoverValue ? { coverImage: newCoverValue } : {})
       };
+  
       const { data } = await API.put(`/events/${evEditingId}`, payload);
       const p = toUploadsPath(data.coverImage || newCoverValue || "");
       const normalized = { ...data, _srcPath: p, coverUrl: formatImageUrl(p) };
-      setEvents((arr) => arr.map((x) => ((x._id || x.id) === evEditingId ? { ...x, ...normalized } : x)));
+  
+      setEvents(arr => arr.map(x => ((x._id || x.id) === evEditingId ? { ...x, ...normalized } : x)));
       evReset();
       showToast("success", "Success", "Event updated successfully!");
     } catch (err) {
@@ -605,6 +612,7 @@ export default function HomepageAdmin() {
       setEvSaving(false);
     }
   }
+  
 
   async function deleteEvent(id) {
     const result = await Swal.fire({
