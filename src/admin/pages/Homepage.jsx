@@ -53,14 +53,16 @@ API.interceptors.response.use(
 );
 
 /* ---------------------------------------
-   Image URL helpers (mirror charity page)
+   Image URL helpers (best-practice)
 ---------------------------------------- */
-const isBlobLike = (u = "") => /^blob:|^data:/i.test(String(u));
+const isDataUrl = (v = "") => /^data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,/i.test(String(v));
+const isBlobUrl = (v = "") => /^blob:/i.test(String(v));
+const isHttpUrl = (v = "") => /^https?:\/\//i.test(String(v));
 
 /** Always produce a usable <img> URL from what we have */
 const formatImageUrl = (url) => {
   if (!url) return "";
-  if (/^https?:\/\//i.test(url) || isBlobLike(url)) return url;
+  if (isDataUrl(url) || isBlobUrl(url) || isHttpUrl(url)) return url;
 
   // Already a server path like /uploads/images/xxx.webp
   if (url.startsWith("/uploads")) return `${API_ORIGIN}${url}`;
@@ -71,17 +73,23 @@ const formatImageUrl = (url) => {
   return `${API_ORIGIN}/uploads/${inImages}`;
 };
 
-/** Extract a DB-safe relative path like /uploads/images/xxx.webp */
+/** Extract a DB-safe relative path like /uploads/images/xxx.webp (keep data: as-is) */
 const toUploadsPath = (v) => {
-  if (!v || typeof v !== "string") return "";
-  if (v.startsWith("/uploads/")) return v;
-  const m = v.match(/\/uploads\/[^\s"'?]+/);
+  const s = String(v || "");
+  if (!s) return "";
+  if (isDataUrl(s)) return s; // keep base64 data URL intact
+  if (s.startsWith("/uploads/")) return s;
+
+  // Try to extract /uploads/... from an absolute URL
+  const m = s.match(/\/uploads\/[^\s"'?]+/i);
   if (m) return m[0];
-  const clean = v.replace(/^\/+/, "").replace(/^images\//, "");
+
+  // Fallback for bare filenames or images/...
+  const clean = s.replace(/^\/+/, "").replace(/^images\//, "");
   return `/uploads/images/${clean}`;
 };
 
-/** Build variant endpoint for on-demand resized fallback */
+/** Build variant endpoint for on-demand resized fallback (legacy; may 410 if disabled server-side) */
 const toVariantUrl = (srcPath, w = 640) => {
   const fn = (srcPath || "").split("/").pop(); // filename.webp
   return fn ? `${API_BASE}/upload/variant/${fn}?width=${w}` : "";
@@ -119,7 +127,7 @@ const IconEdit = () => (<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81
 const IconChevronLeft = () => (<svg viewBox="0 0 24 24"><path d="M15.41 16.59L10.83 12l4.58-4.59L14 6l-6 6 6 6z"/></svg>);
 const IconChevronRight = () => (<svg viewBox="0 0 24 24"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z"/></svg>);
 const IconEvent = () => (<svg viewBox="0 0 24 24"><path d="M19 4h-1V2h-2v2H8V2H6v2H5a3 3 0 00-3 3v11a3 3 0 003 3h14a3 3 0 003-3V7a3 3 0 00-3-3zm1 14a1 1 0 01-1 1H5a1 1 0 01-1-1V10h16v8zM4 8V7a1 1 0 011-1h14a1 1 0 011 1v1H4z"/></svg>);
-const IconCalendar = () => (<svg viewBox="0 0 24 24"><path d="M7 2h2v3H7V2zm8 0h2v3h-2V2zM4 7h16v13a2 2 0 01-2 2H6a2 2 0 01-2-2V7zm3 4h2v2H7v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2z"/></svg>);
+const IconCalendar = () => (<svg viewBox="0 0 24 24"><path d="M7 2h2v3H7V2zm8 0h2v3h-2V2zM4 7h16v13a2 2 0 01-2 2H6a2 2 0 01-2-2V7zm3 4h2v2H7v-2zm4 0h2v2H11v-2zm4 0h2v2H15v-2z"/></svg>);
 const IconTag = () => (<svg viewBox="0 0 24 24"><path d="M10 3H3v7l8 8 7-7-8-8zm-6 2h4v4H4V5z"/></svg>);
 
 /* ===================================================================
@@ -264,21 +272,22 @@ export default function HomepageAdmin() {
       fd.append("file", form.file);
       const up = await API.post("/upload/image", fd);
 
-      // Store relative path (not absolute URL)
-      const srcPath = toUploadsPath(up.data?.path || up.data?.url || "");
+      // Accept data: URLs (new) or legacy /uploads paths
+      const uploaded = up.data?.url || up.data?.path || "";
+      const srcValue = isDataUrl(uploaded) ? uploaded : toUploadsPath(uploaded);
 
       const payload = {
         title: form.title.trim(),
         subtitle: form.subtitle.trim(),
         alt: form.alt.trim() || "Homepage slide",
-        src: srcPath, // store path
+        src: srcValue, // store path OR data URL
         align: form.align,
         overlay: Number(form.overlay) || 40,
         published: !!form.published
       };
 
       const { data } = await API.post("/slides", payload);
-      const createdPath = toUploadsPath(data.src || data.path || srcPath);
+      const createdPath = toUploadsPath(data.src || data.path || srcValue);
       const normalized = { ...data, _srcPath: createdPath, srcUrl: formatImageUrl(createdPath) };
 
       setSlides((arr) => [normalized, ...arr]);
@@ -303,12 +312,13 @@ export default function HomepageAdmin() {
 
     try {
       setSaving(true);
-      let newSrcPath;
+      let newSrcValue;
       if (form.file) {
         const fd = new FormData();
         fd.append("file", form.file);
         const up = await API.post("/upload/image", fd);
-        newSrcPath = toUploadsPath(up.data?.path || up.data?.url || "");
+        const uploaded = up.data?.url || up.data?.path || "";
+        newSrcValue = isDataUrl(uploaded) ? uploaded : toUploadsPath(uploaded);
       }
 
       const payload = {
@@ -318,11 +328,11 @@ export default function HomepageAdmin() {
         align: form.align,
         overlay: Number(form.overlay) || 40,
         published: !!form.published,
-        ...(newSrcPath ? { src: newSrcPath } : {})
+        ...(newSrcValue ? { src: newSrcValue } : {})
       };
 
       const { data } = await API.put(`/slides/${editingId}`, payload);
-      const p = toUploadsPath(data.src || newSrcPath || "");
+      const p = toUploadsPath(data.src || newSrcValue || "");
       const normalized = { ...data, _srcPath: p, srcUrl: formatImageUrl(p) };
 
       setSlides((arr) =>
@@ -529,7 +539,9 @@ export default function HomepageAdmin() {
       const fd = new FormData();
       fd.append("file", evForm.file);
       const up = await API.post("/upload/image", fd);
-      const coverPath = toUploadsPath(up.data?.path || up.data?.url || "");
+
+      const uploaded = up.data?.url || up.data?.path || "";
+      const coverValue = isDataUrl(uploaded) ? uploaded : toUploadsPath(uploaded);
 
       const payload = {
         title: evForm.title.trim(),
@@ -537,11 +549,11 @@ export default function HomepageAdmin() {
         date: evForm.date ? new Date(evForm.date).toISOString() : undefined,
         location: evForm.location.trim(),
         description: evForm.description.trim(),
-        coverImage: coverPath, // store path
+        coverImage: coverValue, // store path OR data URL
         published: !!evForm.published
       };
       const { data } = await API.post("/events", payload);
-      const p = toUploadsPath(data.coverImage || coverPath);
+      const p = toUploadsPath(data.coverImage || coverValue);
       const normalized = { ...data, _srcPath: p, coverUrl: formatImageUrl(p) };
       setEvents((arr) => [normalized, ...arr]);
       evReset();
@@ -561,12 +573,13 @@ export default function HomepageAdmin() {
     if (!evEditingId) return;
     try {
       setEvSaving(true);
-      let newCoverPath;
+      let newCoverValue;
       if (evForm.file) {
         const fd = new FormData();
         fd.append("file", evForm.file);
         const up = await API.post("/upload/image", fd);
-        newCoverPath = toUploadsPath(up.data?.path || up.data?.url || "");
+        const uploaded = up.data?.url || up.data?.path || "";
+        newCoverValue = isDataUrl(uploaded) ? uploaded : toUploadsPath(uploaded);
       }
       const payload = {
         title: evForm.title.trim(),
@@ -575,10 +588,10 @@ export default function HomepageAdmin() {
         location: evForm.location.trim(),
         description: evForm.description.trim(),
         published: !!evForm.published,
-        ...(newCoverPath ? { coverImage: newCoverPath } : {})
+        ...(newCoverValue ? { coverImage: newCoverValue } : {})
       };
       const { data } = await API.put(`/events/${evEditingId}`, payload);
-      const p = toUploadsPath(data.coverImage || newCoverPath || "");
+      const p = toUploadsPath(data.coverImage || newCoverValue || "");
       const normalized = { ...data, _srcPath: p, coverUrl: formatImageUrl(p) };
       setEvents((arr) => arr.map((x) => ((x._id || x.id) === evEditingId ? { ...x, ...normalized } : x)));
       evReset();
