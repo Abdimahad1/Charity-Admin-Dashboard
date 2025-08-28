@@ -11,6 +11,12 @@ const API_BASE =
     ? (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api").replace(/\/$/, "")
     : (import.meta.env.VITE_API_DEPLOY_URL || import.meta.env.VITE_API_DEPLOY || "https://charity-backend-c05j.onrender.com/api").replace(/\/$/, "");
 
+/* Useful for turning /api origin into bare host for static /uploads */
+const API_ORIGIN = API_BASE.replace(/\/api(?:\/.*)?$/, "");
+
+/* Max upload size must match server (multer: 10MB) */
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
 /* ---------------------------------------
    Axios instance + interceptors
 ---------------------------------------- */
@@ -21,7 +27,7 @@ const API = axios.create({
 });
 
 API.interceptors.request.use((cfg) => {
-  const t = sessionStorage.getItem("token");
+  const t = sessionStorage.getItem("token") || localStorage.getItem("token");
   if (t) cfg.headers.Authorization = `Bearer ${t}`;
   return cfg;
 });
@@ -29,67 +35,56 @@ API.interceptors.request.use((cfg) => {
 API.interceptors.response.use(
   (r) => r,
   (error) => {
-    if (error?.response) {
-      console.error(`[API ${error.response.status}]`, error.config?.url, error.response?.data || error.message);
+    // Friendly message for large files
+    const msg = error?.response?.data?.message || error?.message || "";
+    const code = error?.response?.data?.code || "";
+    if (
+      error?.response?.status === 413 ||
+      code === "LIMIT_FILE_SIZE" ||
+      /file too large/i.test(msg) ||
+      /payload too large/i.test(msg)
+    ) {
+      showToast("warning", "Image too large", "This image is too large. Please choose another image.");
     } else {
-      console.error(`[API error]`, error?.message || error);
+      console.error(`[API error]`, error?.response?.status, error?.config?.url, msg);
     }
     return Promise.reject(error);
   }
 );
 
 /* ---------------------------------------
-   Simplified URL helpers (like charity page)
+   Image URL helpers (mirror charity page)
 ---------------------------------------- */
 const isBlobLike = (u = "") => /^blob:|^data:/i.test(String(u));
 
-// Simple URL formatter like in charity page
+/** Always produce a usable <img> URL from what we have */
 const formatImageUrl = (url) => {
-  if (!url) return '';
-  if (url.startsWith('http') || isBlobLike(url)) return url;
-  if (url.startsWith('/uploads')) return `${API_BASE.replace('/api', '')}${url}`;
-  return `${API_BASE.replace('/api', '')}/uploads/${url}`;
+  if (!url) return "";
+  if (/^https?:\/\//i.test(url) || isBlobLike(url)) return url;
+
+  // Already a server path like /uploads/images/xxx.webp
+  if (url.startsWith("/uploads")) return `${API_ORIGIN}${url}`;
+
+  // Bare filename or "images/..." → normalize to /uploads/images/...
+  const clean = url.replace(/^\/+/, "");
+  const inImages = clean.startsWith("images/") ? clean : `images/${clean}`;
+  return `${API_ORIGIN}/uploads/${inImages}`;
 };
 
-// Simplified version for responsive images (optional)
-const responsiveUrl = (url, width, format = "webp") => {
-  if (!url || isBlobLike(url)) return url || "";
-  const baseUrl = formatImageUrl(url);
-  return `${baseUrl}?width=${width}&format=${format}`;
+/** Extract a DB-safe relative path like /uploads/images/xxx.webp */
+const toUploadsPath = (v) => {
+  if (!v || typeof v !== "string") return "";
+  if (v.startsWith("/uploads/")) return v;
+  const m = v.match(/\/uploads\/[^\s"'?]+/);
+  if (m) return m[0];
+  const clean = v.replace(/^\/+/, "").replace(/^images\//, "");
+  return `/uploads/images/${clean}`;
 };
 
-// Simplified srcSet builder
-const buildSrcSet = (url) => {
-  if (!url || isBlobLike(url)) return "";
-  const widths = [320, 480, 640, 768, 1024, 1280, 1536, 1920];
-  return widths.map((w) => `${responsiveUrl(url, w)} ${w}w`).join(", ");
-};
-
-// Simplified slide source picker
-const pickSlideSrc = (s) => {
-  if (s?.src) return formatImageUrl(s.src);
-  const img0 = Array.isArray(s?.images) ? s.images[0] : undefined;
-  const img0Url = (img0 && typeof img0 === "object") ? (img0.url ?? img0.src ?? img0.path) : img0;
-  const candidate =
-    s?.image ??
-    s?.url ??
-    s?.file?.url ??
-    img0Url ??
-    (s?.filename ? `/uploads/images/${s.filename}` : "");
-  return formatImageUrl(candidate);
-};
-
-// Simplified event cover picker
-const pickEventCover = (e) => {
-  if (e?.coverImage) return formatImageUrl(e.coverImage);
-  const img0 = Array.isArray(e?.images) ? e.images[0] : undefined;
-  const img0Url = (img0 && typeof img0 === "object") ? (img0.url ?? img0.src ?? img0.path) : img0;
-  const candidate =
-    e?.cover?.url ??
-    e?.image ??
-    img0Url ??
-    (e?.filename ? `/uploads/images/${e.filename}` : "");
-  return formatImageUrl(candidate);
+/** Build variant endpoint for on-demand resized fallback */
+const toVariantUrl = (srcPath, w = 640) => {
+  const fn = (srcPath || "").split("/").pop(); // filename.webp
+  return fn ? `${API_BASE}/upload/variant/${fn}?width=${w}` : "";
 };
 
 /* ---------- Toast notifications ---------- */
@@ -99,13 +94,13 @@ const showToast = (icon, title, message = "") => {
     title,
     text: message,
     toast: true,
-    position: 'top-end',
+    position: "top-end",
     showConfirmButton: false,
     timer: 3000,
     timerProgressBar: true,
     didOpen: (toast) => {
-      toast.addEventListener('mouseenter', Swal.stopTimer);
-      toast.addEventListener('mouseleave', Swal.resumeTimer);
+      toast.addEventListener("mouseenter", Swal.stopTimer);
+      toast.addEventListener("mouseleave", Swal.resumeTimer);
     }
   });
 };
@@ -160,10 +155,13 @@ export default function HomepageAdmin() {
       try {
         const { data } = await API.get("/slides");
         const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
-        const normalized = items.map((s) => ({
-          ...s,
-          src: pickSlideSrc(s)
-        }));
+        const normalized = items.map((s) => {
+          const raw =
+            s.src || s.path || s.image ||
+            (s.filename ? `/uploads/images/${s.filename}` : "");
+          const _srcPath = toUploadsPath(raw);
+          return { ...s, _srcPath, srcUrl: formatImageUrl(_srcPath) };
+        });
         if (mounted) {
           setSlides(normalized);
           if (normalized.length > 0) setCurrentIdx(0);
@@ -171,7 +169,7 @@ export default function HomepageAdmin() {
       } catch (e) {
         setError("Failed to load homepage slides.");
         console.error(e);
-        showToast('error', 'Error', 'Failed to load homepage slides.');
+        showToast("error", "Error", "Failed to load homepage slides.");
       } finally {
         if (mounted) setLoading(false);
       }
@@ -180,20 +178,32 @@ export default function HomepageAdmin() {
   }, []);
 
   const selectedSlide = slides[currentIdx] || null;
-  const currentPreview = useMemo(() => {
-    if (form.preview) return form.preview;
+
+  const currentPreviewUrl = useMemo(() => {
+    if (form.preview) return form.preview; // blob while picking
     if (editingId) {
       const s = slides.find((x) => (x._id || x.id) === editingId);
-      if (s?.src) return s.src;
+      if (s?.srcUrl) return s.srcUrl;
     }
-    return selectedSlide?.src || "";
+    return selectedSlide?.srcUrl || "";
   }, [form.preview, editingId, slides, selectedSlide]);
 
   const onPickFile = () => fileRef.current?.click();
+
   const onFileChange = (e) => {
     const f = e.target.files?.[0];
     if (!f) {
       setForm((s) => ({ ...s, file: null, preview: "" }));
+      return;
+    }
+    if (!f.type?.startsWith("image/")) {
+      showToast("warning", "Not an image", "Please choose an image file.");
+      e.target.value = "";
+      return;
+    }
+    if (f.size > MAX_IMAGE_BYTES) {
+      showToast("warning", "Image too large", "This image is too large. Please choose another image.");
+      e.target.value = "";
       return;
     }
     const url = URL.createObjectURL(f);
@@ -201,6 +211,9 @@ export default function HomepageAdmin() {
   };
 
   const resetForm = () => {
+    if (form.preview && form.preview.startsWith("blob:")) {
+      URL.revokeObjectURL(form.preview);
+    }
     setForm({
       title: "",
       subtitle: "",
@@ -220,7 +233,8 @@ export default function HomepageAdmin() {
     if (!s) return;
     setCurrentIdx(idx);
     setEditingId(s._id || s.id || "");
-    setForm({
+    setForm((prev) => ({
+      ...prev,
       title: s.title || "",
       subtitle: s.subtitle || "",
       alt: s.alt || "",
@@ -228,19 +242,19 @@ export default function HomepageAdmin() {
       overlay: Number(s.overlay ?? 40),
       published: !!s.published,
       file: null,
-      preview: ""
-    });
+      preview: "" // we render from srcUrl instead
+    }));
     if (fileRef.current) fileRef.current.value = "";
   };
 
   async function addSlide(e) {
     e.preventDefault();
     if (!form.file) {
-      showToast('warning', 'Image Required', 'Please pick an image.');
+      showToast("warning", "Image Required", "Please pick an image.");
       return;
     }
     if (!form.title.trim()) {
-      showToast('warning', 'Headline Required', 'Headline is required.');
+      showToast("warning", "Headline Required", "Headline is required.");
       return;
     }
 
@@ -249,29 +263,35 @@ export default function HomepageAdmin() {
       const fd = new FormData();
       fd.append("file", form.file);
       const up = await API.post("/upload/image", fd);
-      const url = up.data?.url ? formatImageUrl(up.data.url) : "";
+
+      // Store relative path (not absolute URL)
+      const srcPath = toUploadsPath(up.data?.path || up.data?.url || "");
 
       const payload = {
         title: form.title.trim(),
         subtitle: form.subtitle.trim(),
         alt: form.alt.trim() || "Homepage slide",
-        src: url,
+        src: srcPath, // store path
         align: form.align,
         overlay: Number(form.overlay) || 40,
         published: !!form.published
       };
 
       const { data } = await API.post("/slides", payload);
-      const normalized = { ...data, src: pickSlideSrc({ ...data, src: data.src || url }) };
+      const createdPath = toUploadsPath(data.src || data.path || srcPath);
+      const normalized = { ...data, _srcPath: createdPath, srcUrl: formatImageUrl(createdPath) };
+
       setSlides((arr) => [normalized, ...arr]);
       setCurrentIdx(0);
       setEditingId(normalized._id || normalized.id || "");
       setForm((s) => ({ ...s, file: null, preview: "" }));
       if (fileRef.current) fileRef.current.value = "";
-      showToast('success', 'Success', 'Slide created successfully!');
+      showToast("success", "Success", "Slide created successfully!");
     } catch (err) {
       console.error(err);
-      showToast('error', 'Error', err?.response?.data?.message || "Failed to create slide.");
+      if (!/file too large|payload too large/i.test(err?.response?.data?.message || "")) {
+        showToast("error", "Error", err?.response?.data?.message || "Failed to create slide.");
+      }
     } finally {
       setSaving(false);
     }
@@ -283,12 +303,12 @@ export default function HomepageAdmin() {
 
     try {
       setSaving(true);
-      let newSrc;
+      let newSrcPath;
       if (form.file) {
         const fd = new FormData();
         fd.append("file", form.file);
         const up = await API.post("/upload/image", fd);
-        newSrc = up.data?.url ? formatImageUrl(up.data.url) : undefined;
+        newSrcPath = toUploadsPath(up.data?.path || up.data?.url || "");
       }
 
       const payload = {
@@ -298,22 +318,28 @@ export default function HomepageAdmin() {
         align: form.align,
         overlay: Number(form.overlay) || 40,
         published: !!form.published,
-        ...(newSrc ? { src: newSrc } : {})
+        ...(newSrcPath ? { src: newSrcPath } : {})
       };
 
       const { data } = await API.put(`/slides/${editingId}`, payload);
-      const normalized = { ...data, src: pickSlideSrc({ ...data }) };
+      const p = toUploadsPath(data.src || newSrcPath || "");
+      const normalized = { ...data, _srcPath: p, srcUrl: formatImageUrl(p) };
+
       setSlides((arr) =>
         arr.map((s) => ((s._id || s.id) === editingId ? { ...s, ...normalized } : s))
       );
+
       const idx = slides.findIndex((s) => (s._id || s.id) === editingId);
       if (idx >= 0) setCurrentIdx(idx);
+
       setForm((s) => ({ ...s, file: null, preview: "" }));
       if (fileRef.current) fileRef.current.value = "";
-      showToast('success', 'Success', 'Slide updated successfully!');
+      showToast("success", "Success", "Slide updated successfully!");
     } catch (err) {
       console.error(err);
-      showToast('error', 'Error', err?.response?.data?.message || "Failed to update slide.");
+      if (!/file too large|payload too large/i.test(err?.response?.data?.message || "")) {
+        showToast("error", "Error", err?.response?.data?.message || "Failed to update slide.");
+      }
     } finally {
       setSaving(false);
     }
@@ -321,13 +347,13 @@ export default function HomepageAdmin() {
 
   async function removeSlide(id) {
     const result = await Swal.fire({
-      title: 'Are you sure?',
+      title: "Are you sure?",
       text: "You won't be able to revert this!",
-      icon: 'warning',
+      icon: "warning",
       showCancelButton: true,
-      confirmButtonColor: '#3085d6',
-      cancelButtonColor: '#d33',
-      confirmButtonText: 'Yes, delete it!'
+      confirmButtonColor: "#3085d6",
+      cancelButtonColor: "#d33",
+      confirmButtonText: "Yes, delete it!"
     });
 
     if (!result.isConfirmed) return;
@@ -341,10 +367,10 @@ export default function HomepageAdmin() {
       } else {
         setCurrentIdx((idx) => Math.max(0, Math.min(idx, slides.length - 2)));
       }
-      showToast('success', 'Deleted', 'Slide has been deleted.');
+      showToast("success", "Deleted", "Slide has been deleted.");
     } catch (e) {
       console.error(e);
-      showToast('error', 'Error', e?.response?.data?.message || "Failed to delete slide.");
+      showToast("error", "Error", e?.response?.data?.message || "Failed to delete slide.");
     }
   }
 
@@ -358,10 +384,10 @@ export default function HomepageAdmin() {
       if ((slide._id || slide.id) === editingId) {
         setForm((f) => ({ ...f, published: updated.published }));
       }
-      showToast('success', 'Updated', `Slide ${updated.published ? 'published' : 'unpublished'}`);
+      showToast("success", "Updated", `Slide ${updated.published ? "published" : "unpublished"}`);
     } catch (e) {
       console.error(e);
-      showToast('error', 'Error', e?.response?.data?.message || "Failed to update publish state.");
+      showToast("error", "Error", e?.response?.data?.message || "Failed to update publish state.");
     }
   }
 
@@ -370,14 +396,18 @@ export default function HomepageAdmin() {
     try {
       const { data } = await API.patch(`/slides/${id}/move`, null, { params: { dir } });
       const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
-      const normalized = items.map((s) => ({ ...s, src: pickSlideSrc(s) }));
+      const normalized = items.map((s) => {
+        const raw = s.src || s.path || s.image || (s.filename ? `/uploads/images/${s.filename}` : "");
+        const _srcPath = toUploadsPath(raw);
+        return { ...s, _srcPath, srcUrl: formatImageUrl(_srcPath) };
+      });
       setSlides(normalized);
       const tgtIndex = normalized.findIndex((s) => (s._id || s.id) === id);
       if (tgtIndex >= 0) setCurrentIdx(tgtIndex);
-      showToast('success', 'Moved', `Slide moved ${dir}`);
+      showToast("success", "Moved", `Slide moved ${dir}`);
     } catch (e) {
       console.error(e);
-      showToast('error', 'Error', e?.response?.data?.message || "Failed to reorder slide.");
+      showToast("error", "Error", e?.response?.data?.message || "Failed to reorder slide.");
     } finally {
       setMovingId("");
     }
@@ -409,14 +439,17 @@ export default function HomepageAdmin() {
       try {
         const { data } = await API.get("/events");
         const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
-        const normalized = items.map((e) => ({
-          ...e,
-          coverImage: pickEventCover(e)
-        }));
+        const normalized = items.map((e) => {
+          const raw =
+            e.coverImage || e.cover?.url || e.image || e.path ||
+            (e.filename ? `/uploads/images/${e.filename}` : "");
+          const _srcPath = toUploadsPath(raw);
+          return { ...e, _srcPath, coverUrl: formatImageUrl(_srcPath) };
+        });
         if (mounted) setEvents(normalized);
       } catch (e) {
         console.error(e);
-        showToast('error', 'Error', 'Failed to load events.');
+        showToast("error", "Error", "Failed to load events.");
       } finally {
         if (mounted) setEvLoading(false);
       }
@@ -425,10 +458,21 @@ export default function HomepageAdmin() {
   }, []);
 
   const evPick = () => evFileRef.current?.click();
+
   const evFileChange = (e) => {
     const f = e.target.files?.[0];
     if (!f) {
       setEvForm((s) => ({ ...s, file: null, preview: "" }));
+      return;
+    }
+    if (!f.type?.startsWith("image/")) {
+      showToast("warning", "Not an image", "Please choose an image file.");
+      e.target.value = "";
+      return;
+    }
+    if (f.size > MAX_IMAGE_BYTES) {
+      showToast("warning", "Image too large", "This image is too large. Please choose another image.");
+      e.target.value = "";
       return;
     }
     const url = URL.createObjectURL(f);
@@ -436,6 +480,9 @@ export default function HomepageAdmin() {
   };
 
   const evReset = () => {
+    if (evForm.preview && evForm.preview.startsWith("blob:")) {
+      URL.revokeObjectURL(evForm.preview);
+    }
     setEvForm({
       title: "",
       category: "",
@@ -462,7 +509,7 @@ export default function HomepageAdmin() {
       description: e.description || e.excerpt || "",
       published: !!e.published,
       file: null,
-      preview: pickEventCover(e) || ""
+      preview: e.coverUrl || "" // we render from coverUrl
     });
     if (evFileRef.current) evFileRef.current.value = "";
   }
@@ -470,11 +517,11 @@ export default function HomepageAdmin() {
   async function addEvent(e) {
     e.preventDefault();
     if (!evForm.file) {
-      showToast('warning', 'Image Required', 'Please choose an event image.');
+      showToast("warning", "Image Required", "Please choose an event image.");
       return;
     }
     if (!evForm.title.trim()) {
-      showToast('warning', 'Title Required', 'Title is required.');
+      showToast("warning", "Title Required", "Title is required.");
       return;
     }
     try {
@@ -482,7 +529,7 @@ export default function HomepageAdmin() {
       const fd = new FormData();
       fd.append("file", evForm.file);
       const up = await API.post("/upload/image", fd);
-      const cover = up.data?.url ? formatImageUrl(up.data.url) : "";
+      const coverPath = toUploadsPath(up.data?.path || up.data?.url || "");
 
       const payload = {
         title: evForm.title.trim(),
@@ -490,17 +537,20 @@ export default function HomepageAdmin() {
         date: evForm.date ? new Date(evForm.date).toISOString() : undefined,
         location: evForm.location.trim(),
         description: evForm.description.trim(),
-        coverImage: cover,
+        coverImage: coverPath, // store path
         published: !!evForm.published
       };
       const { data } = await API.post("/events", payload);
-      const normalized = { ...data, coverImage: pickEventCover({ ...data }) };
+      const p = toUploadsPath(data.coverImage || coverPath);
+      const normalized = { ...data, _srcPath: p, coverUrl: formatImageUrl(p) };
       setEvents((arr) => [normalized, ...arr]);
       evReset();
-      showToast('success', 'Success', 'Event created successfully!');
+      showToast("success", "Success", "Event created successfully!");
     } catch (err) {
       console.error(err);
-      showToast('error', 'Error', err?.response?.data?.message || "Failed to create event.");
+      if (!/file too large|payload too large/i.test(err?.response?.data?.message || "")) {
+        showToast("error", "Error", err?.response?.data?.message || "Failed to create event.");
+      }
     } finally {
       setEvSaving(false);
     }
@@ -511,12 +561,12 @@ export default function HomepageAdmin() {
     if (!evEditingId) return;
     try {
       setEvSaving(true);
-      let newCover;
+      let newCoverPath;
       if (evForm.file) {
         const fd = new FormData();
         fd.append("file", evForm.file);
         const up = await API.post("/upload/image", fd);
-        newCover = up.data?.url ? formatImageUrl(up.data.url) : undefined;
+        newCoverPath = toUploadsPath(up.data?.path || up.data?.url || "");
       }
       const payload = {
         title: evForm.title.trim(),
@@ -525,16 +575,19 @@ export default function HomepageAdmin() {
         location: evForm.location.trim(),
         description: evForm.description.trim(),
         published: !!evForm.published,
-        ...(newCover ? { coverImage: newCover } : {})
+        ...(newCoverPath ? { coverImage: newCoverPath } : {})
       };
       const { data } = await API.put(`/events/${evEditingId}`, payload);
-      const normalized = { ...data, coverImage: pickEventCover({ ...data }) };
+      const p = toUploadsPath(data.coverImage || newCoverPath || "");
+      const normalized = { ...data, _srcPath: p, coverUrl: formatImageUrl(p) };
       setEvents((arr) => arr.map((x) => ((x._id || x.id) === evEditingId ? { ...x, ...normalized } : x)));
       evReset();
-      showToast('success', 'Success', 'Event updated successfully!');
+      showToast("success", "Success", "Event updated successfully!");
     } catch (err) {
       console.error(err);
-      showToast('error', 'Error', err?.response?.data?.message || "Failed to update event.");
+      if (!/file too large|payload too large/i.test(err?.response?.data?.message || "")) {
+        showToast("error", "Error", err?.response?.data?.message || "Failed to update event.");
+      }
     } finally {
       setEvSaving(false);
     }
@@ -542,13 +595,13 @@ export default function HomepageAdmin() {
 
   async function deleteEvent(id) {
     const result = await Swal.fire({
-      title: 'Are you sure?',
+      title: "Are you sure?",
       text: "You won't be able to revert this!",
-      icon: 'warning',
+      icon: "warning",
       showCancelButton: true,
-      confirmButtonColor: '#3085d6',
-      cancelButtonColor: '#d33',
-      confirmButtonText: 'Yes, delete it!'
+      confirmButtonColor: "#3085d6",
+      cancelButtonColor: "#d33",
+      confirmButtonText: "Yes, delete it!"
     });
 
     if (!result.isConfirmed) return;
@@ -557,10 +610,10 @@ export default function HomepageAdmin() {
       await API.delete(`/events/${id}`);
       setEvents((arr) => arr.filter((x) => (x._id || x.id) !== id));
       if (evEditingId === id) evReset();
-      showToast('success', 'Deleted', 'Event has been deleted.');
+      showToast("success", "Deleted", "Event has been deleted.");
     } catch (e) {
       console.error(e);
-      showToast('error', 'Error', e?.response?.data?.message || "Failed to delete event.");
+      showToast("error", "Error", e?.response?.data?.message || "Failed to delete event.");
     }
   }
 
@@ -572,10 +625,10 @@ export default function HomepageAdmin() {
       setEvents((arr) => arr.map((x) => ((x._id || x.id) === id ? updated : x)));
       await API.put(`/events/${id}`, { published: updated.published });
       if (evEditingId === id) setEvForm((f) => ({ ...f, published: updated.published }));
-      showToast('success', 'Updated', `Event ${updated.published ? 'published' : 'unpublished'}`);
+      showToast("success", "Updated", `Event ${updated.published ? "published" : "unpublished"}`);
     } catch (e) {
       console.error(e);
-      showToast('error', 'Error', e?.response?.data?.message || "Failed to update publish state.");
+      showToast("error", "Error", e?.response?.data?.message || "Failed to update publish state.");
     }
   }
 
@@ -586,6 +639,15 @@ export default function HomepageAdmin() {
     const dt = new Date(d);
     return Number.isNaN(dt.getTime()) ? "" : dt.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
   };
+
+  /* Cleanup any created blob previews on unmount */
+  useEffect(() => {
+    return () => {
+      if (form.preview && form.preview.startsWith("blob:")) URL.revokeObjectURL(form.preview);
+      if (evForm.preview && evForm.preview.startsWith("blob:")) URL.revokeObjectURL(evForm.preview);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* ================= RENDER ================ */
   const hasPreview = !!form.preview;
@@ -722,7 +784,7 @@ export default function HomepageAdmin() {
           <div
             className={`hm-hero ${form.align}`}
             style={{
-              backgroundImage: currentPreview ? `url('${formatImageUrl(currentPreview)}')` : undefined,
+              backgroundImage: currentPreviewUrl ? `url('${formatImageUrl(currentPreviewUrl)}')` : undefined,
               "--hm-overlay": `${(Number(form.overlay) || 40) / 100}`
             }}
           >
@@ -736,22 +798,24 @@ export default function HomepageAdmin() {
               <IconChevronLeft />
             </button>
 
-            {/* offscreen img to force-load preview & fallback to original if needed */}
-            {currentPreview ? (
+            {/* offscreen img to force-load preview & fallback to variant if needed */}
+            {currentPreviewUrl ? (
               <img
                 alt=""
                 aria-hidden="true"
                 className="hm-preloader"
                 loading="lazy"
                 decoding="async"
-                src={formatImageUrl(currentPreview)}
+                src={formatImageUrl(currentPreviewUrl)}
                 onError={(e) => {
-                  // Try direct URL if the formatted one fails
-                  const directUrl = currentPreview.startsWith('/') 
-                    ? `${API_BASE.replace('/api', '')}${currentPreview}`
-                    : currentPreview;
-                  if (e.currentTarget.src !== directUrl) {
-                    e.currentTarget.src = directUrl;
+                  // fallback → variant endpoint
+                  const editing = editingId
+                    ? slides.find((x) => (x._id || x.id) === editingId)
+                    : slides[currentIdx];
+                  const v = toVariantUrl(editing?._srcPath, 1280);
+                  if (!e.currentTarget.dataset.retried && v) {
+                    e.currentTarget.dataset.retried = "1";
+                    e.currentTarget.src = v;
                   }
                 }}
                 style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
@@ -821,8 +885,8 @@ export default function HomepageAdmin() {
           <ul className="hm-slides">
             {slides.map((s, idx) => {
               const id = s._id || s.id;
-              const thumbSrc = formatImageUrl(s.src);
-              
+              const thumbSrc = s.srcUrl;
+
               return (
                 <li key={id} className={`hm-slide ${idx === currentIdx ? "is-current" : ""}`}>
                   <button
@@ -831,19 +895,18 @@ export default function HomepageAdmin() {
                     title="Click to load this slide into the form"
                     aria-label={`Edit ${s.title || "slide"}`}
                   >
-                    {s.src ? (
+                    {thumbSrc ? (
                       <img
                         alt={s.alt || s.title || "Slide"}
                         loading="lazy"
                         decoding="async"
                         src={thumbSrc}
                         onError={(e) => {
-                          // Try direct URL if the formatted one fails
-                          const directUrl = s.src.startsWith('/') 
-                            ? `${API_BASE.replace('/api', '')}${s.src}`
-                            : s.src;
-                          if (e.currentTarget.src !== directUrl) {
-                            e.currentTarget.src = directUrl;
+                          // 1st fallback: try the variant endpoint
+                          const v = toVariantUrl(s._srcPath, 640);
+                          if (!e.currentTarget.dataset.retried && v) {
+                            e.currentTarget.dataset.retried = "1";
+                            e.currentTarget.src = v;
                             return;
                           }
                           e.currentTarget.style.visibility = "hidden";
@@ -1007,12 +1070,11 @@ export default function HomepageAdmin() {
                   decoding="async"
                   src={formatImageUrl(evForm.preview)}
                   onError={(e) => {
-                    // Try direct URL if the formatted one fails
-                    const directUrl = evForm.preview.startsWith('/') 
-                      ? `${API_BASE.replace('/api', '')}${evForm.preview}`
-                      : evForm.preview;
-                    if (e.currentTarget.src !== directUrl) {
-                      e.currentTarget.src = directUrl;
+                    // If preview is a persisted path, try variant fallback
+                    const v = toVariantUrl(toUploadsPath(evForm.preview), 960);
+                    if (!e.currentTarget.dataset.retried && v) {
+                      e.currentTarget.dataset.retried = "1";
+                      e.currentTarget.src = v;
                       return;
                     }
                     e.currentTarget.style.visibility = "hidden";
@@ -1049,7 +1111,7 @@ export default function HomepageAdmin() {
           <ul className="he-items">
             {events.map((e) => {
               const id = e._id || e.id;
-              const cover = pickEventCover(e) || "";
+              const cover = e.coverUrl || "";
 
               return (
                 <li key={id} className="he-item">
@@ -1060,14 +1122,12 @@ export default function HomepageAdmin() {
                         alt={e.title || "Event"}
                         loading="lazy"
                         decoding="async"
-                        src={formatImageUrl(cover)}
+                        src={cover}
                         onError={(ev) => {
-                          // Try direct URL if the formatted one fails
-                          const directUrl = cover.startsWith('/') 
-                            ? `${API_BASE.replace('/api', '')}${cover}`
-                            : cover;
-                          if (ev.currentTarget.src !== directUrl) {
-                            ev.currentTarget.src = directUrl;
+                          const v = toVariantUrl(e._srcPath, 480);
+                          if (!ev.currentTarget.dataset.retried && v) {
+                            ev.currentTarget.dataset.retried = "1";
+                            ev.currentTarget.src = v;
                             return;
                           }
                           ev.currentTarget.style.visibility = "hidden";
