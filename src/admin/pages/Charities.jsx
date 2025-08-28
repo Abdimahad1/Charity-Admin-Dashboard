@@ -26,15 +26,18 @@ const DEPLOY_BASE =
 const isLocalHost = ["localhost", "127.0.0.1", ""].includes(window.location.hostname);
 const BASE = isLocalHost ? LOCAL_BASE : DEPLOY_BASE;
 
+/** Bare origin (no /api) — used to build absolute URLs to /uploads */
+const API_ORIGIN = BASE.replace(/\/api(?:\/.*)?$/, "");
+
 // Create axios instance with base URL
-const API = axios.create({ 
+const API = axios.create({
   baseURL: BASE,
   timeout: 15000, // Increased timeout
 });
 
 // Attach token from sessionStorage
 API.interceptors.request.use((cfg) => {
-  const t = sessionStorage.getItem("token") || localStorage.getItem('token');
+  const t = sessionStorage.getItem("token") || localStorage.getItem("token");
   if (t) cfg.headers.Authorization = `Bearer ${t}`;
   return cfg;
 });
@@ -76,7 +79,13 @@ API.interceptors.response.use(
   }
 );
 
-/* helpers */
+/* ==============================
+   Helpers (updated best-practice)
+============================== */
+const isDataUrl = (v = "") => /^data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,/i.test(String(v));
+const isBlobUrl = (v = "") => /^blob:/i.test(String(v));
+const isHttpUrl = (v = "") => /^https?:\/\//i.test(String(v));
+
 const normalizeOne = (r) => {
   if (!r) return r;
   // ensure `id` exists even if backend uses `_id`
@@ -88,12 +97,50 @@ const normalizeMany = (data) => {
   return arr.map(normalizeOne);
 };
 
-// Helper to format image URLs
+/**
+ * Turn whatever we have into a usable <img src="...">:
+ * - data:... → return as-is
+ * - blob:... → return as-is
+ * - http(s)  → return as-is
+ * - /uploads/... → prefix with API origin
+ * - images/foo.webp or foo.webp → normalize to /uploads/images/foo.webp
+ */
 const formatImageUrl = (url) => {
-  if (!url) return '';
-  if (url.startsWith('http')) return url;
-  if (url.startsWith('/uploads')) return `${BASE.replace('/api', '')}${url}`;
-  return `${BASE.replace('/api', '')}/uploads/${url}`;
+  if (!url) return "";
+  if (isDataUrl(url) || isBlobUrl(url) || isHttpUrl(url)) return url;
+
+  if (url.startsWith("/uploads/")) {
+    return `${API_ORIGIN}${url}`;
+  }
+
+  // handle "uploads/images/..." or "images/..." or bare filename
+  const clean = url.replace(/^\/+/, "");
+  const inImages = clean.startsWith("images/") ? clean : `images/${clean}`;
+  return `${API_ORIGIN}/uploads/${inImages}`;
+};
+
+/**
+ * Convert any value to a DB-safe relative path (if applicable).
+ * - data:... → keep as-is (you’re storing base64 directly)
+ * - absolute http(s) with /uploads/... → extract that relative path
+ * - /uploads/... → keep as-is
+ * - images/foo.webp or bare filename → /uploads/images/foo.webp
+ */
+const toUploadsPath = (v) => {
+  const s = String(v || "");
+  if (!s) return "";
+  if (isDataUrl(s)) return s;
+
+  // Already a relative uploads path
+  if (s.startsWith("/uploads/")) return s;
+
+  // Try to extract /uploads/... from an absolute URL
+  const m = s.match(/\/uploads\/[^\s"'?]+/i);
+  if (m) return m[0];
+
+  // Fallback: treat as filename or images/...
+  const clean = s.replace(/^\/+/, "").replace(/^images\//, "");
+  return `/uploads/images/${clean}`;
 };
 
 // Toast notifications
@@ -124,7 +171,7 @@ export default function Charities() {
   const [deletingId, setDeletingId] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
-  
+
   // New state for pagination
   const [page, setPage] = useState(1);
   const [limit] = useState(50); // adjust if you add UI for it
@@ -245,9 +292,9 @@ export default function Charities() {
       cancelButtonColor: '#d33',
       confirmButtonText: 'Yes, delete it!'
     });
-    
+
     if (!result.isConfirmed) return;
-    
+
     try {
       setDeletingId(id);
       await API.delete(`/charities/${id}`);
@@ -286,8 +333,12 @@ export default function Charities() {
       const { data } = await API.post("/upload", fd, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      const uploadedUrl = data?.url || "";
-      setEditing((ed) => ({ ...ed, cover: uploadedUrl }));
+
+      // Accept both new base64 (data:url) and legacy /uploads paths.
+      const uploaded = data?.url || data?.path || "";
+      const normalizedCover = isDataUrl(uploaded) ? uploaded : toUploadsPath(uploaded);
+
+      setEditing((ed) => ({ ...ed, cover: normalizedCover }));
       showToast('success', 'Success', 'Image uploaded successfully!');
     } catch (err) {
       console.error(err);
@@ -355,14 +406,14 @@ export default function Charities() {
                     <td className="char-cell-title">
                       <div className="char-cell-with-thumb">
                         {r.cover ? (
-                          <img 
-                            className="char-cover-thumb" 
-                            src={formatImageUrl(r.cover)} 
-                            alt="" 
-                            onError={(e) => { 
+                          <img
+                            className="char-cover-thumb"
+                            src={formatImageUrl(r.cover)}
+                            alt=""
+                            onError={(e) => {
                               e.currentTarget.style.display = 'none';
                               e.currentTarget.nextElementSibling.style.display = 'block';
-                            }} 
+                            }}
                           />
                         ) : (
                           <div className="char-cover-thumb char-cover-placeholder" aria-hidden="true" />
@@ -518,9 +569,9 @@ export default function Charities() {
                     </small>
                     {editing.cover && (
                       <div className="char-thumb-preview">
-                        <img 
-                          src={formatImageUrl(editing.cover)} 
-                          alt="cover preview" 
+                        <img
+                          src={formatImageUrl(editing.cover)}
+                          alt="cover preview"
                           onError={(e) => {
                             e.target.style.display = 'none';
                             e.target.parentElement.innerHTML = '<div>Image failed to load</div>';
